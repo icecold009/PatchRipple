@@ -8,4 +8,4 @@ for(const name of packages){
  const notice=files.find(p=>/^notice(?:\.|$)/i.test(p));if(notice)notices.push(await readFile(dir+'/'+notice,'utf8'));
 }
 notices.push('Python grammar distributed by tree-sitter-wasms. Upstream MIT license from tree-sitter/tree-sitter-python v0.21.0; package build dependency declares ^0.21.0.\n'+await readFile('licenses/tree-sitter-python-MIT.txt','utf8'));
-await writeFile('dist/THIRD_PARTY_NOTICES.txt',notices.join('\n\n--------------------\n\n')+'\n');
+await writeFile('dist/THIRD_PARTY_NOTICES.txt',(notices.join('\n\n--------------------\n\n')+'\n').replace(/\r\n?/g,'\n'));

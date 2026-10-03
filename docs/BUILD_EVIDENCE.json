@@ -2,7 +2,7 @@
   "generatedFilesIdentical": true,
   "files": {
     "schema/graph-v1.json": "9b7db8f38d90ab86942432b62b4fed9fecddb45e657ead7cc9f125e07d57e30c",
-    "dist/THIRD_PARTY_NOTICES.txt": "844bd6030c177ab2b8b9b748b215a8c2db5db11d4f5022b3fd8582418c8333ad",
+    "dist/THIRD_PARTY_NOTICES.txt": "65b25f95ef4a7c4364799d4425aa4c604717e20a352daff61b8fab379f864707",
     "dist/action.cjs": "5cfd41e1f5f9b7ab5e5b2e43b78364526b6efd189e71e8d7ce14a523b4facbbc",
     "dist/cli.cjs": "f84c1035b19d88a00cc9c2069cb466016b9bf3eb2cf0de50e9d5141b44c01410",
     "dist/tree-sitter-python.wasm": "9056d0fb0c337810d019fae350e8167786119da98f0f282aceae7ab89ee8253b",

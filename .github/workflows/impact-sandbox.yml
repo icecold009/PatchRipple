@@ -31,7 +31,7 @@ jobs:
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$HEAD_SHA^{commit}"
           git merge-base "$BASE_SHA" "$HEAD_SHA"
-      - uses: icecold009/PatchRipple@5d332d649fdec04eabd486a6019674bdc9f55992
+      - uses: icecold009/PatchRipple@528902572d5c6b5f18cf68e4a527472b421fc6ad
         id: impact
         with:
           base: ${{ github.event.pull_request.base.sha }}

@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "repository": {
+    "name": "example/project",
+    "url": "https://github.com/example/project"
+  },
+  "change": {
+    "baseTipSha": "1111111111111111111111111111111111111111",
+    "analysisBaseSha": "1111111111111111111111111111111111111111",
+    "headSha": "2222222222222222222222222222222222222222",
+    "pullRequest": 42,
+    "mode": "pr"
+  },
+  "changes": [
+    {
+      "status": "M",
+      "oldPath": "src/core.ts",
+      "newPath": "src/core.ts"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "file:src/api.ts",
+      "path": "src/api.ts",
+      "roles": [
+        "impact"
+      ],
+      "revisions": [
+        "base",
+        "head"
+      ],
+      "owners": [
+        "@maintainers"
+      ],
+      "testReasons": []
+    },
+    {
+      "id": "file:src/core.test.ts",
+      "path": "src/core.test.ts",
+      "roles": [
+        "impact",
+        "test"
+      ],
+      "revisions": [
+        "base",
+        "head"
+      ],
+      "owners": [
+        "@maintainers"
+      ],
+      "testReasons": [
+        "Imports the changed core module"
+      ]
+    },
+    {
+      "id": "file:src/core.ts",
+      "path": "src/core.ts",
+      "roles": [
+        "changed"
+      ],
+      "revisions": [
+        "base",
+        "head"
+      ],
+      "owners": [
+        "@core"
+      ],
+      "testReasons": []
+    },
+    {
+      "id": "file:src/ui.ts",
+      "path": "src/ui.ts",
+      "roles": [
+        "impact"
+      ],
+      "revisions": [
+        "base",
+        "head"
+      ],
+      "owners": [
+        "@maintainers"
+      ],
+      "testReasons": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "file:src/api.ts",
+      "to": "file:src/core.ts",
+      "kind": "static",
+      "revision": "base"
+    },
+    {
+      "from": "file:src/core.test.ts",
+      "to": "file:src/core.ts",
+      "kind": "static",
+      "revision": "base"
+    },
+    {
+      "from": "file:src/ui.ts",
+      "to": "file:src/api.ts",
+      "kind": "static",
+      "revision": "base"
+    },
+    {
+      "from": "file:src/api.ts",
+      "to": "file:src/core.ts",
+      "kind": "static",
+      "revision": "head"
+    },
+    {
+      "from": "file:src/core.test.ts",
+      "to": "file:src/core.ts",
+      "kind": "static",
+      "revision": "head"
+    },
+    {
+      "from": "file:src/ui.ts",
+      "to": "file:src/api.ts",
+      "kind": "static",
+      "revision": "head"
+    }
+  ],
+  "warnings": [
+    {
+      "code": "SYNTHETIC_DEMO",
+      "detail": "Hand-authored demo: repository identity and SHAs are examples, not reachable public revisions."
+    }
+  ],
+  "completeness": {
+    "complete": false,
+    "omittedNodes": 0,
+    "omittedEdges": 0
+  },
+  "limits": {
+    "maxFiles": 5000,
+    "maxBytes": 41943040,
+    "maxFileBytes": 524288,
+    "maxNodes": 500,
+    "maxEdges": 2000,
+    "maxDepth": 20,
+    "timeoutMs": 60000
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-02T17:51:04.932Z",
+  "platform": "win32",
+  "arch": "x64",
+  "osRelease": "10.0.26200",
+  "cpu": "11th Gen Intel(R) Core(TM) i3-1115G4 @ 3.00GHz",
+  "systemMemoryBytes": 16801976320,
+  "filesPerRevision": 1000,
+  "elapsedMs": 1096,
+  "rssAfterBytes": 186949632,
+  "nodes": 21,
+  "warnings": [
+    "DEPTH_LIMIT",
+    "DEPTH_LIMIT"
+  ],
+  "limits": {
+    "maxFiles": 5000,
+    "maxBytes": 41943040,
+    "maxFileBytes": 524288,
+    "maxNodes": 500,
+    "maxEdges": 2000,
+    "maxDepth": 20,
+    "timeoutMs": 60000
+  }
+}

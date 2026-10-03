@@ -1,5 +1,7 @@
 # Release evidence
 
+Latest hosted evidence2026-10-03: HOSTED_EVIDENCE.md records passing implementation CI and downloaded same-repository JS/Python artifact verification after portability/mobile corrections. Fork and human trials remain missing; historical missing hosted/approval statements below are superseded by that record.
+
 ## 2026-10-03 authorized hosted setup
 
 The user approved the prepared baseline/publication/testing scope. Jev retried the full plan in two batches covering 15,825 characters with six evidence files: jev-1.13.0, 14,323 input / 320 output tokens, pause_for_user_decision. After explicit approval, the bounded execution preflight returned ready with an advisory revise_plan_before_changes gate: jev-1.13.0, 4,267 input / 156 output tokens. No code/diff approval is claimed. The connector created the README-only main baseline b877db5a8a1f38eb717bb5418a7433ceba894cf8 and the implementation feature branch. Hosted runs, artifacts, fork and human evidence remain pending. Historical pending-approval statements below describe the earlier state.

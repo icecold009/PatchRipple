@@ -1,5 +1,7 @@
 # Completion audit against IMPLEMENTATION_PLAN.md
 
+Current update2026-10-03: user approved hosted setup; implementation CI and real same-repository JS/Python Action artifact checks now pass, including downloaded offline mobile/exact-link verification. See HOSTED_EVIDENCE.md for immutable revisions, run/artifact identities and corrected failures. Fork verification and human installation/adoption remain missing. The milestone table and pending-approval narrative below preserve the earlier local audit snapshot and are superseded for same-repository hosted evidence and approval status.
+
 Current objective: **implement this plan now, must be done FULLY**. The objective is not complete. This audit separates implementation evidence from hosted/human requirements; it does not redefine V1 as a local-only product.
 
 | Milestone | Required proof | Current authoritative evidence | Assessment |

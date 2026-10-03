@@ -1,5 +1,3 @@
-# Replace 5d332d649fdec04eabd486a6019674bdc9f55992 with a reviewed published full SHA before installing.
-# This template is not hosted verification evidence.
 name: Static PR impact
 on:
   pull_request:
@@ -33,7 +31,7 @@ jobs:
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$HEAD_SHA^{commit}"
           git merge-base "$BASE_SHA" "$HEAD_SHA"
-      - uses: icecold009/PatchRipple@PATCHRIPPLE_COMMIT
+      - uses: icecold009/PatchRipple@5d332d649fdec04eabd486a6019674bdc9f55992
         id: impact
         with:
           base: ${{ github.event.pull_request.base.sha }}

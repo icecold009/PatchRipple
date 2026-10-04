@@ -220050,7 +220050,7 @@ var properties = {
   changes: { type: "array", items: { type: "object", additionalProperties: false, required: ["status"], properties: { status: { enum: ["A", "M", "D", "R", "T"] }, oldPath: str, newPath: str } } },
   nodes: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "path", "roles", "revisions", "owners", "testReasons"], properties: { id: str, path: str, roles: { type: "array", uniqueItems: true, items: { enum: ["changed", "impact", "test"] } }, revisions: { type: "array", minItems: 1, uniqueItems: true, items: revision }, owners: { type: "array", uniqueItems: true, items: str }, testReasons: { type: "array", uniqueItems: true, items: str } } } },
   edges: { type: "array", items: { type: "object", additionalProperties: false, required: ["from", "to", "kind", "revision"], properties: { from: str, to: str, revision, kind: { enum: ["static", "type-only", "dynamic-literal", "require", "python"] } } } },
-  warnings: { type: "array", items: { type: "object", additionalProperties: false, required: ["code", "detail"], properties: { code: str, detail: str, path: str, revision } } },
+  warnings: { type: "array", items: { type: "object", additionalProperties: false, required: ["code", "detail"], properties: { code: str, detail: str, path: str, revision, category: { enum: ["expected-external", "unresolved-local", "resource-limit", "analysis-uncertainty"] } } } },
   completeness: { type: "object", additionalProperties: false, required: ["complete", "omittedNodes", "omittedEdges"], properties: { complete: { type: "boolean" }, omittedNodes: { type: "integer", minimum: 0 }, omittedEdges: { type: "integer", minimum: 0 } } },
   limits: { type: "object", additionalProperties: false, required: Object.keys(defaultLimits), properties: Object.fromEntries(Object.keys(defaultLimits).map((k) => [k, { type: "integer", minimum: 1 }])) }
 };
@@ -220068,6 +220068,7 @@ function validateGraph(input) {
   if (!validate(input)) throw new Error("Invalid graph schema: " + JSON.stringify(validate.errors));
   const g = input;
   repositoryUrl(g.repository.url);
+  for (const warning of g.warnings) if (warning.category !== void 0 && warning.category !== warningCategory(warning)) throw new Error("Warning category does not match its code");
   const nodes = /* @__PURE__ */ new Map();
   for (const n of g.nodes) {
     if (!safePath(n.path) || n.id !== "file:" + n.path || nodes.has(n.id)) throw new Error("Invalid or duplicate node path");
@@ -220085,10 +220086,16 @@ function validateGraph(input) {
     edgeKeys.add(key);
   }
   if (g.nodes.length > g.limits.maxNodes || g.edges.length > g.limits.maxEdges) throw new Error("Graph exceeds declared limits");
-  if (g.completeness.complete && (g.warnings.length || g.completeness.omittedNodes || g.completeness.omittedEdges)) throw new Error("Incomplete graph cannot claim completeness");
+  if (g.completeness.complete && (g.warnings.some((w) => warningCategory(w) !== "expected-external") || g.completeness.omittedNodes || g.completeness.omittedEdges)) throw new Error("Incomplete graph cannot claim completeness");
 }
 var compare = (a, b) => a < b ? -1 : a > b ? 1 : 0;
 var nodeId = (p) => "file:" + p;
+function warningCategory(w) {
+  if (w.code === "EXPECTED_EXTERNAL_IMPORT") return "expected-external";
+  if (w.code === "UNRESOLVED_IMPORT" || w.code === "UNRESOLVED_WORKSPACE_IMPORT") return "unresolved-local";
+  if (w.code === "TIME_LIMIT" || /(?:^|_)LIMIT$/.test(w.code)) return "resource-limit";
+  return "analysis-uncertainty";
+}
 
 // src/git.ts
 var GitReader = class {
@@ -220302,68 +220309,253 @@ async function scan(snapshot, revision2, roots, deadline) {
       edges.push(e);
     }
   };
-  let config = {};
-  const configText = snapshot.files.get("tsconfig.json");
-  if (configText) {
-    const parsed = import_typescript.default.parseConfigFileTextToJson("tsconfig.json", configText);
-    if (parsed.error) warn("CONFIG_UNSUPPORTED", "tsconfig.json", "Invalid tsconfig JSON");
-    else if (parsed.config && typeof parsed.config === "object") {
-      if (parsed.config.extends) warn("CONFIG_UNSUPPORTED", "tsconfig.json", "External extends is not followed");
-      const opts = parsed.config.compilerOptions;
-      if (opts && typeof opts === "object") {
-        if (typeof opts.baseUrl === "string") {
-          const base = import_node_path.default.posix.normalize(opts.baseUrl);
-          if (base === "." || safePath(base)) config.baseUrl = base === "." ? "" : base;
-          else warn("CONFIG_UNSUPPORTED", "tsconfig.json", "Unsafe baseUrl ignored");
-        }
-        if (opts.paths && typeof opts.paths === "object") config.paths = opts.paths;
-      }
+  const packageFiles = [...snapshot.files].filter(([p]) => p.endsWith("/package.json") || p === "package.json");
+  const packageDirs = /* @__PURE__ */ new Map();
+  for (const [p, text] of packageFiles) {
+    try {
+      const value = JSON.parse(text);
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const dir = p === "package.json" ? "" : import_node_path.default.posix.dirname(p);
+      packageDirs.set(dir, value);
+    } catch {
+      warn("CONFIG_UNSUPPORTED", p, "Invalid package.json; package metadata was ignored");
     }
   }
+  const rootManifest = packageDirs.get("") ?? {};
+  const workspaceObject = rootManifest.workspaces && typeof rootManifest.workspaces === "object" && !Array.isArray(rootManifest.workspaces) ? rootManifest.workspaces : void 0;
+  const workspaceFieldValid = Array.isArray(rootManifest.workspaces) || !!workspaceObject && Array.isArray(workspaceObject.packages);
+  const workspacesRaw = Array.isArray(rootManifest.workspaces) ? rootManifest.workspaces : workspaceFieldValid ? workspaceObject.packages : [];
+  if (rootManifest.workspaces !== void 0 && !workspaceFieldValid) warn("CONFIG_UNSUPPORTED", "package.json", "Workspace declarations must be a string array or an object with a packages array");
+  const workspaces = /* @__PURE__ */ new Map();
+  const ambiguousWorkspaces = /* @__PURE__ */ new Set();
+  for (const pattern of workspacesRaw) if (typeof pattern !== "string" || pattern.includes("{") || pattern.includes("[") || pattern.includes("]") || pattern === "!") warn("CONFIG_UNSUPPORTED", "package.json", "Unsupported workspace pattern: " + String(pattern));
+  const globMatches = (pattern, value) => {
+    const normalized = pattern.replace(/^!/, "").replace(/^\.\//, "").replace(/\/$/, "");
+    if (!safePath(normalized.replaceAll("*", "x").replaceAll("?", "x"))) return false;
+    if (normalized.includes("[") || normalized.includes("]")) return false;
+    const escaped = normalized.replace(/[.+^${}()|\\]/g, "\\$&").replaceAll("**", "\0").replaceAll("*", "[^/]*").replaceAll("?", "[^/]");
+    return new RegExp("^" + escaped.replaceAll("\0", ".*") + "$").test(value);
+  };
+  for (const [dir, manifest] of packageDirs) {
+    if (!dir || typeof manifest.name !== "string") continue;
+    const patterns = workspacesRaw.filter((pattern) => typeof pattern === "string"), included = patterns.some((pattern) => !pattern.startsWith("!") && globMatches(pattern, dir)), excluded = patterns.some((pattern) => pattern.startsWith("!") && globMatches(pattern, dir));
+    if (included && !excluded) {
+      if (workspaces.has(manifest.name) && workspaces.get(manifest.name).dir !== dir) {
+        ambiguousWorkspaces.add(manifest.name);
+        workspaces.delete(manifest.name);
+        warn("CONFIG_UNSUPPORTED", "package.json", "Duplicate workspace package name is ambiguous: " + manifest.name);
+      } else if (!ambiguousWorkspaces.has(manifest.name)) workspaces.set(manifest.name, { dir, manifest });
+    }
+  }
+  const configCache = /* @__PURE__ */ new Map();
+  const resolvingConfigs = /* @__PURE__ */ new Set();
+  const configFileFor = (from) => {
+    let dir = import_node_path.default.posix.dirname(from);
+    while (dir !== ".") {
+      const candidate = dir + "/tsconfig.json";
+      if (snapshot.files.has(candidate)) return candidate;
+      const parent = import_node_path.default.posix.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return snapshot.files.has("tsconfig.json") ? "tsconfig.json" : void 0;
+  };
+  const resolveConfig = (file, depth = 0) => {
+    const cached = configCache.get(file);
+    if (cached) return cached;
+    if (depth >= 8 || resolvingConfigs.has(file)) {
+      warn("CONFIG_UNSUPPORTED", file, "TypeScript config inheritance is cyclic or exceeds eight levels");
+      return { rules: [] };
+    }
+    resolvingConfigs.add(file);
+    let result = { rules: [] };
+    const text = snapshot.files.get(file), parsed = text ? import_typescript.default.parseConfigFileTextToJson(file, text) : void 0;
+    if (!parsed || parsed.error || !parsed.config || typeof parsed.config !== "object") warn("CONFIG_UNSUPPORTED", file, "Invalid TypeScript config JSON");
+    else {
+      const config = parsed.config;
+      const parentPaths = typeof config.extends === "string" ? [config.extends] : Array.isArray(config.extends) ? config.extends.filter((v) => typeof v === "string") : [];
+      if (config.extends !== void 0 && (!Array.isArray(config.extends) && typeof config.extends !== "string" || Array.isArray(config.extends) && parentPaths.length !== config.extends.length)) warn("CONFIG_UNSUPPORTED", file, "Unsupported TypeScript extends value");
+      for (const parent of parentPaths) {
+        if (!parent.startsWith(".") || parent.includes("\\")) {
+          warn("CONFIG_UNSUPPORTED", file, "External TypeScript extends is not followed: " + parent);
+          continue;
+        }
+        const base = import_node_path.default.posix.normalize(import_node_path.default.posix.join(import_node_path.default.posix.dirname(file), parent));
+        if (!safePath(base)) {
+          warn("CONFIG_UNSUPPORTED", file, "Unsafe TypeScript extends path ignored");
+          continue;
+        }
+        const candidate = snapshot.files.has(base) ? base : snapshot.files.has(base + ".json") ? base + ".json" : snapshot.files.has(base + "/tsconfig.json") ? base + "/tsconfig.json" : void 0;
+        if (candidate) {
+          const inherited = resolveConfig(candidate, depth + 1), merged = new Map(result.rules.map((rule) => [rule.pattern, rule]));
+          for (const rule of inherited.rules) merged.set(rule.pattern, rule);
+          result = { baseUrl: inherited.baseUrl ?? result.baseUrl, rules: [...merged.values()] };
+        } else warn("CONFIG_UNSUPPORTED", file, "Relative TypeScript extends target was not found: " + parent);
+      }
+      const options = config.compilerOptions;
+      if (options !== void 0 && (!options || typeof options !== "object" || Array.isArray(options))) warn("CONFIG_UNSUPPORTED", file, "compilerOptions must be an object");
+      else if (options && typeof options === "object") {
+        const compiler = options;
+        let ruleBase = result.baseUrl ?? import_node_path.default.posix.dirname(file);
+        if (typeof compiler.baseUrl === "string") {
+          const next = import_node_path.default.posix.normalize(import_node_path.default.posix.join(import_node_path.default.posix.dirname(file), compiler.baseUrl));
+          if (next === "" || next === ".") result.baseUrl = "";
+          else if (safePath(next)) result.baseUrl = next;
+          else warn("CONFIG_UNSUPPORTED", file, "Unsafe baseUrl ignored");
+          ruleBase = result.baseUrl ?? import_node_path.default.posix.dirname(file);
+        }
+        if (compiler.paths !== void 0) {
+          if (!compiler.paths || typeof compiler.paths !== "object" || Array.isArray(compiler.paths)) warn("CONFIG_UNSUPPORTED", file, "paths must be an object");
+          else for (const [pattern, value] of Object.entries(compiler.paths)) {
+            if (pattern.split("*").length > 2 || !Array.isArray(value) || !value.every((v) => typeof v === "string")) {
+              warn("CONFIG_UNSUPPORTED", file, "Unsupported paths rule: " + pattern);
+              continue;
+            }
+            const values = value.map((v) => import_node_path.default.posix.normalize(import_node_path.default.posix.join(ruleBase, v))).filter(safePath);
+            result.rules = result.rules.filter((rule) => rule.pattern !== pattern);
+            result.rules.push({ pattern, values, base: ruleBase });
+          }
+        }
+      }
+    }
+    resolvingConfigs.delete(file);
+    result.rules.sort((a, b) => Number(a.pattern.includes("*")) - Number(b.pattern.includes("*")) || b.pattern.split("*")[0].length - a.pattern.split("*")[0].length || compare(a.pattern, b.pattern));
+    configCache.set(file, result);
+    return result;
+  };
+  const effectiveConfig = (from) => {
+    const file = configFileFor(from);
+    return file ? resolveConfig(file) : { rules: [] };
+  };
+  const resolveManifestTarget = (dir, manifest, subpath) => {
+    let target, exportMiddle = "";
+    const exportsValue = manifest.exports;
+    if (exportsValue !== void 0) {
+      let value = exportsValue;
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        const exportsObject = value;
+        if (Object.keys(exportsObject).some((key) => key.startsWith("."))) {
+          const key = subpath ? "./" + subpath : ".";
+          value = exportsObject[key];
+          if (value === void 0) for (const [pattern, entry] of Object.entries(exportsObject)) {
+            const star = pattern.indexOf("*");
+            if (star < 0 || pattern.indexOf("*", star + 1) >= 0) continue;
+            const prefix = pattern.slice(0, star), suffix = pattern.slice(star + 1);
+            if (key.startsWith(prefix) && key.endsWith(suffix) && key.length >= prefix.length + suffix.length) {
+              value = entry;
+              exportMiddle = key.slice(prefix.length, key.length - suffix.length);
+              break;
+            }
+          }
+        } else if (!subpath) value = exportsObject;
+        else value = void 0;
+      } else if (subpath) value = void 0;
+      const pick = (v) => {
+        if (typeof v === "string") return v;
+        if (Array.isArray(v)) {
+          for (const item of v) {
+            const found = pick(item);
+            if (found) return found;
+          }
+          return;
+        }
+        if (v && typeof v === "object") {
+          const conditions = v;
+          for (const condition of ["import", "default", "node", "require", "types"]) {
+            const found = pick(conditions[condition]);
+            if (found) return found;
+          }
+        }
+      };
+      target = pick(value);
+      if (target && exportMiddle) target = target.replaceAll("*", exportMiddle);
+    } else if (subpath) target = "./" + subpath;
+    else for (const key of ["module", "main", "types", "typings"]) if (typeof manifest[key] === "string") {
+      target = manifest[key];
+      break;
+    }
+    if (!target && !subpath && exportsValue === void 0) target = "./index";
+    if (target && exportsValue === void 0 && !target.startsWith("./")) {
+      if (target.startsWith("/") || target.startsWith("..")) return;
+      target = "./" + target;
+    }
+    if (!target || !target.startsWith("./") || target.includes("\\")) return;
+    const relative = import_node_path.default.posix.normalize(import_node_path.default.posix.join(dir, target.slice(2)));
+    return safePath(relative) ? relative : void 0;
+  };
+  const resolvePackagePath = (dir, manifest, subpath) => {
+    const target = resolveManifestTarget(dir, manifest, subpath);
+    if (!target) return;
+    for (const candidate of candidates(target)) if (snapshot.files.has(candidate)) return candidate;
+  };
+  const packageNameAndSubpath = (spec) => {
+    const parts = spec.split("/");
+    const count = spec.startsWith("@") ? 2 : 1;
+    return { name: parts.slice(0, count).join("/"), subpath: parts.slice(count).join("/") };
+  };
+  const resolveWorkspace = (from, spec) => {
+    const { name, subpath } = packageNameAndSubpath(spec);
+    if (ambiguousWorkspaces.has(name)) {
+      warn("UNRESOLVED_WORKSPACE_IMPORT", from, "Duplicate workspace package name is ambiguous: " + name);
+      return;
+    }
+    const pkg = workspaces.get(name);
+    if (!pkg) return;
+    const result = resolvePackagePath(pkg.dir, pkg.manifest, subpath);
+    if (!result) warn("UNRESOLVED_WORKSPACE_IMPORT", from, "Workspace import does not resolve through the package export map: " + spec);
+    return result;
+  };
+  const resolveDirectoryPackage = (from, dir) => {
+    const manifest = packageDirs.get(dir);
+    if (!manifest) return;
+    const result = resolvePackagePath(dir, manifest, "");
+    if (!result) warn("CONFIG_UNSUPPORTED", from, "Package entry cannot be resolved safely from " + dir + "/package.json");
+    return result;
+  };
   const resolveJS = (from, spec) => {
     if (spec.includes("\\") || spec.includes("\0")) {
       warn("UNRESOLVED_IMPORT", from, "Unsafe import path");
       return;
     }
+    const config = effectiveConfig(from);
     const bases = [];
     let local = spec.startsWith(".");
+    let alias = false;
     if (local) bases.push(import_node_path.default.posix.join(import_node_path.default.posix.dirname(from), spec));
     else {
       const matches = [];
-      for (const [pattern, values] of Object.entries(config.paths ?? {})) {
-        if (!Array.isArray(values) || !values.every((x) => typeof x === "string") || pattern.split("*").length > 2) {
-          warn("CONFIG_UNSUPPORTED", "tsconfig.json", "Unsupported paths rule");
-          continue;
-        }
-        const [prefix, suffix] = pattern.split("*");
-        const match = suffix === void 0 ? spec === pattern : spec.startsWith(prefix) && spec.endsWith(suffix) && spec.length >= prefix.length + suffix.length;
-        if (match) matches.push({ pattern, values, prefix, suffix });
+      for (const rule2 of config.rules) {
+        const [prefix, suffix] = rule2.pattern.split("*");
+        const match = suffix === void 0 ? spec === rule2.pattern : spec.startsWith(prefix) && spec.endsWith(suffix) && spec.length >= prefix.length + suffix.length;
+        if (match) matches.push(rule2);
       }
-      matches.sort((a, b) => Number(b.suffix === void 0) - Number(a.suffix === void 0) || b.prefix.length - a.prefix.length || compare(a.pattern, b.pattern));
       const rule = matches[0];
       if (rule) {
         local = true;
-        const middle = rule.suffix === void 0 ? "" : spec.slice(rule.prefix.length, spec.length - rule.suffix.length);
-        for (const target of rule.values) {
-          if (target.split("*").length > 2) {
-            warn("CONFIG_UNSUPPORTED", "tsconfig.json", "Unsupported paths substitution");
-            continue;
-          }
-          bases.push(import_node_path.default.posix.join(config.baseUrl ?? "", target.replace("*", middle)));
-        }
+        alias = true;
+        const [prefix, suffix] = rule.pattern.split("*");
+        const middle = suffix === void 0 ? "" : spec.slice(prefix.length, spec.length - suffix.length);
+        for (const target of rule.values) bases.push(target.replace("*", middle));
       }
       if (config.baseUrl !== void 0) bases.push(import_node_path.default.posix.join(config.baseUrl, spec));
     }
     for (const b of bases) {
-      if (!safePath(b)) continue;
-      if (snapshot.paths.has(b + "/package.json")) {
-        warn("PACKAGE_DIRECTORY_UNSUPPORTED", from, "Directory package metadata is not resolved: " + spec);
+      if (!safePath(b) && b !== ".") continue;
+      if (packageDirs.has(b)) {
+        const result = resolveDirectoryPackage(from, b);
+        if (result) return result;
         continue;
       }
       for (const c of candidates(b)) if (snapshot.files.has(c)) return c;
     }
-    if (local) warn("UNRESOLVED_IMPORT", from, "Cannot resolve " + spec);
-    else if (!spec.startsWith("node:")) warn("EXTERNAL_OR_WORKSPACE_IMPORT", from, "Package/workspace import excluded: " + spec);
+    const workspaceName = packageNameAndSubpath(spec).name, knownWorkspace = workspaces.has(workspaceName);
+    if (!local) {
+      const workspace = resolveWorkspace(from, spec);
+      if (workspace) return workspace;
+      if (knownWorkspace) return;
+    }
+    if (local || alias) warn("UNRESOLVED_IMPORT", from, "Cannot resolve local import " + spec);
+    else if (!spec.startsWith("node:") && !knownWorkspace) warn("EXPECTED_EXTERNAL_IMPORT", from, "External package is excluded from the local import graph: " + spec);
   };
   const resolvePy = (from, imp) => {
     const rel = imp.name.match(/^\.+/)?.[0].length ?? 0;
@@ -220373,7 +220565,7 @@ async function scan(snapshot, revision2, roots, deadline) {
       let dir = import_node_path.default.posix.dirname(from);
       for (let i = 1; i < rel; i++) dir = import_node_path.default.posix.dirname(dir);
       bases = [import_node_path.default.posix.join(dir, name)];
-    } else bases = roots.map((root) => import_node_path.default.posix.join(root, name));
+    } else bases = pythonRoots.map((root) => import_node_path.default.posix.join(root, name));
     const found = [];
     let matchedBases = 0;
     for (const b of new Set(bases)) {
@@ -220394,7 +220586,7 @@ async function scan(snapshot, revision2, roots, deadline) {
       return [];
     }
     if (!found.length) {
-      warn(rel ? "UNRESOLVED_IMPORT" : "EXTERNAL_OR_UNRESOLVED_PYTHON", from, "Python module excluded/unresolved: " + imp.name);
+      warn(rel ? "UNRESOLVED_IMPORT" : "EXPECTED_EXTERNAL_IMPORT", from, (rel ? "Unresolved relative Python module: " : "External Python package is excluded from the local import graph: ") + imp.name);
       return [];
     }
     for (const p of [...found]) {
@@ -220407,6 +220599,17 @@ async function scan(snapshot, revision2, roots, deadline) {
     }
     return [...new Set(found)];
   };
+  const detectedRoots = [...roots];
+  for (const p of snapshot.files.keys()) if (p.endsWith("/__init__.py")) {
+    const parts = p.split("/");
+    const index = parts.lastIndexOf("src");
+    if (index > 0) {
+      const root = parts.slice(0, index + 1).join("/");
+      if (!detectedRoots.includes(root)) detectedRoots.push(root);
+    }
+  }
+  const pythonRoots = detectedRoots.sort(compare);
+  for (const p of snapshot.files.keys()) if (/(?:^|\/)tsconfig\.json$/.test(p)) resolveConfig(p);
   for (const [p, source] of [...snapshot.files].sort(([a], [b]) => compare(a, b))) {
     if (Date.now() > deadline) {
       warn("TIME_LIMIT", p, "Parsing stopped at analysis deadline");
@@ -220568,8 +220771,11 @@ async function analyze(options) {
   const omittedEdges = edgeCandidates.length - edges.length;
   if (omittedNodes) warnings.push({ code: "NODE_LIMIT", detail: omittedNodes + " candidate nodes omitted" });
   if (omittedEdges) warnings.push({ code: "EDGE_LIMIT", detail: omittedEdges + " candidate edges omitted" });
-  const uniqueWarnings = [...new Map(warnings.map((w) => [JSON.stringify(w), w])).values()].sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b)));
-  const graph = { schemaVersion: 1, repository: { name: new URL(url).pathname.slice(1), url }, change, changes, nodes, edges, warnings: uniqueWarnings, completeness: { complete: uniqueWarnings.length === 0, omittedNodes, omittedEdges }, limits };
+  const uniqueWarnings = [...new Map(warnings.map((w) => {
+    const classified = { ...w, category: warningCategory(w) };
+    return [JSON.stringify(classified), classified];
+  })).values()].sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b)));
+  const graph = { schemaVersion: 1, repository: { name: new URL(url).pathname.slice(1), url }, change, changes, nodes, edges, warnings: uniqueWarnings, completeness: { complete: uniqueWarnings.every((w) => w.category === "expected-external"), omittedNodes, omittedEdges }, limits };
   validateGraph(graph);
   return graph;
 }
@@ -220598,18 +220804,27 @@ main{max-width:1440px;margin:auto;padding:32px 28px 24px}.eyebrow{margin:0 0 7px
 
 // src/viewer-client.ts
 var viewerScript = `
-const search=document.getElementById('search'),role=document.getElementById('role'),owner=document.getElementById('owner'),reset=document.getElementById('reset'),files=[...document.querySelectorAll('#files>li')],detail=document.getElementById('detail'),count=document.getElementById('count'),empty=document.getElementById('empty'),diagram=[...document.querySelectorAll('#map-svg [data-node]')];
-let selected=null;
+const search=document.getElementById('search'),role=document.getElementById('role'),owner=document.getElementById('owner'),reset=document.getElementById('reset'),files=[...document.querySelectorAll('#files>li')],detail=document.getElementById('detail'),count=document.getElementById('count'),empty=document.getElementById('empty'),mapSvg=document.getElementById('map-svg'),mapNote=document.getElementById('graph-note'),mapData=document.getElementById('map-data');
+const graph=mapData?JSON.parse(mapData.dataset.graph):{nodes:[],edges:[]},byPath=new Map(graph.nodes.map(n=>[n.path,n])),NS='http://www.w3.org/2000/svg';let selected=null;
 function element(tag,text,className){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;}
 function section(title,items,fallback){const s=element('section',undefined,'detail-section');s.append(element('h3',title));if(items.length){const ul=element('ul');for(const item of items)ul.append(element('li',item));s.append(ul);}else s.append(element('p',fallback,'subtle'));detail.append(s);}
-function selectFile(li,focus=false){selected=li;for(const row of files){row.dataset.selected=String(row===li);row.querySelector('button').setAttribute('aria-pressed',String(row===li));}for(const node of diagram)node.setAttribute('aria-pressed',String(li&&node.dataset.node==='file:'+li.dataset.path));detail.replaceChildren();if(!li){detail.append(element('p','FILE INSPECTOR','eyebrow'),element('h2',files.length?'No matching files':'No changed files'),element('p',files.length?'Clear or adjust your filters to explore the comparison.':'This comparison has no file candidates. Revision and analysis details remain available below.','detail-help'));return;}detail.append(element('p','SELECTED FILE','eyebrow'),element('h2',li.dataset.path));const badges=element('div',undefined,'detail-badges');for(const r of li.dataset.roles.split(','))badges.append(element('span',r,'badge '+r));detail.append(badges);section('Revision evidence',li.dataset.revisions.split(',').map(r=>r==='head'?'Present in head revision':'Present in analysis-base revision'),'No revision evidence');section('Code owners',li.dataset.owners?li.dataset.owners.split(','):[],'No matched CODEOWNERS rule');section('Related test evidence',JSON.parse(li.dataset.reasons),'No test relationship asserted');section('Import relationships',JSON.parse(li.dataset.relations),'No discovered import relationships');const a=li.querySelector('a').cloneNode(true);a.className='source-button';a.textContent='Open exact revision \u2197';detail.append(a);if(focus)detail.focus({preventScroll:window.innerWidth>760});}
-function filter(){let visible=0;const ids=new Set();for(const li of files){const show=li.dataset.path.toLowerCase().includes(search.value.toLowerCase())&&(!role.value||li.dataset.roles.split(',').includes(role.value))&&(!owner.value||li.dataset.owners.split(',').includes(owner.value));li.hidden=!show;if(show){visible++;ids.add('file:'+li.dataset.path);}}for(const node of diagram){const show=ids.has(node.dataset.node);node.style.display=show?'':'none';node.setAttribute('tabindex',show?'0':'-1');}for(const edge of document.querySelectorAll('#map-svg [data-from]'))edge.style.display=ids.has(edge.dataset.from)&&ids.has(edge.dataset.to)?'':'none';count.textContent=visible+(visible===1?' file shown':' files shown');empty.hidden=visible>0;reset.disabled=!(search.value||role.value||owner.value);if(!selected||selected.hidden)selectFile(files.find(li=>!li.hidden)||null);}
-for(const el of [search,role,owner])el.addEventListener('input',filter);
-reset.addEventListener('click',()=>{search.value='';role.value='';owner.value='';filter();search.focus();});
-for(const li of files)li.querySelector('button').addEventListener('click',()=>selectFile(li,true));
-for(const node of diagram){const inspect=()=>{const li=files.find(row=>'file:'+row.dataset.path===node.dataset.node);if(li&&!li.hidden)selectFile(li,true);};node.addEventListener('click',inspect);node.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();inspect();}});}
-document.addEventListener('keydown',event=>{if(event.key==='/'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.target.isContentEditable&&!['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName)){event.preventDefault();search.focus();}});
-filter();selectFile(files.find(li=>li.dataset.roles.split(',').includes('changed'))||files[0]||null);
+function svgElement(tag,attrs={},text){const node=document.createElementNS(NS,tag);for(const [key,value] of Object.entries(attrs))node.setAttribute(key,String(value));if(text!==undefined)node.textContent=text;return node;}
+function renderMap(focusPath){if(!mapSvg)return;const visible=files.filter(li=>!li.hidden),center=visible.find(li=>li.dataset.path===focusPath)||visible.find(li=>li.dataset.roles.split(',').includes('changed'))||visible[0],priority=new Set(),adjacent=new Set();
+ if(center){priority.add(center.dataset.path);for(const edge of graph.edges)if(edge.from==='file:'+center.dataset.path||edge.to==='file:'+center.dataset.path)adjacent.add((edge.from==='file:'+center.dataset.path?edge.to:edge.from).slice(5));for(const revision of ['base','head']){const chain=JSON.parse(center.dataset.chains)[revision];if(chain)for(const filePath of chain)priority.add(filePath);}for(const row of visible)if(row.dataset.roles.split(',').includes('test')&&row.dataset.reasons.includes(center.dataset.path))priority.add(row.dataset.path);}
+ const changed=new Set(visible.filter(li=>li.dataset.roles.split(',').includes('changed')).map(li=>li.dataset.path));if(!center){for(const filePath of changed)priority.add(filePath);}else for(const filePath of changed)if(priority.size<80)priority.add(filePath);
+ const rank=n=>changed.has(n.path)?0:n.path===center?.dataset.path?1:priority.has(n.path)?2:adjacent.has(n.path)?3:n.roles.includes('test')?4:5;
+ let chosen=visible.map(li=>byPath.get(li.dataset.path)).filter(Boolean).sort((a,b)=>rank(a)-rank(b)||a.path.localeCompare(b.path)).slice(0,80);if(center&&!chosen.some(n=>n.path===center.dataset.path))chosen=[byPath.get(center.dataset.path),...chosen.slice(0,79)];const ids=new Set(chosen.map(n=>n.id)),lanes=['changed','impact','test'],counts=[0,0,0],positions=new Map(chosen.map(n=>{const lane=lanes.indexOf(n.roles.includes('changed')?'changed':n.roles.includes('test')?'test':'impact'),row=counts[lane]++;return[n.id,{x:28+lane*350,y:90+row*84}];})),height=Math.max(250,120+Math.max(...counts)*84);
+ mapSvg.replaceChildren();mapSvg.setAttribute('viewBox','0 0 1080 '+height);mapSvg.setAttribute('aria-label',center?'Importers point to dependencies. Focused on '+center.dataset.path+'; '+chosen.length+' of '+visible.length+' visible candidates drawn.':'No files match the current filters.');const defs=svgElement('defs'),marker=svgElement('marker',{id:'arrow',viewBox:'0 0 10 10',refX:10,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'});marker.append(svgElement('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:'#a1ada5'}));defs.append(marker);mapSvg.append(defs);
+ for(const [i,label] of ['Changed files','Potential dependents','Related tests'].entries())mapSvg.append(svgElement('text',{x:28+i*350,y:35,fill:'#b4c1b7','font-family':'system-ui','font-size':12},label.toUpperCase()+' \xB7 '+counts[i]));
+ for(const edge of graph.edges.filter(e=>ids.has(e.from)&&ids.has(e.to))){const a=positions.get(edge.from),b=positions.get(edge.to),offset=edge.revision==='base'?-3:3,sx=a.x+(a.x<b.x?300:0),tx=b.x+(a.x<b.x?0:300),sy=a.y+offset,ty=b.y+offset,d=a.x===b.x?'M'+(a.x+300)+' '+sy+' C'+(a.x+335)+' '+sy+' '+(b.x+335)+' '+ty+' '+(b.x+300)+' '+ty:'M'+sx+' '+sy+' C'+((sx+tx)/2)+' '+sy+' '+((sx+tx)/2)+' '+ty+' '+tx+' '+ty;mapSvg.append(svgElement('path',{d,'data-from':edge.from,'data-to':edge.to,stroke:edge.revision==='base'?'#748479':'#a8b8f1','stroke-width':1.4,fill:'none','marker-end':'url(#arrow)'}));}
+ for(const n of chosen){const p=positions.get(n.id),base=n.path.split('/').at(-1),dir=n.path.includes('/')?n.path.slice(0,n.path.lastIndexOf('/')):'Repository root',primary=n.roles.includes('changed')?'changed':n.roles.includes('test')?'test':'impact',g=svgElement('g',{class:'graph-node','data-node':n.id,'data-role':primary,tabindex:0,role:'button','aria-label':'Inspect '+n.path,'aria-pressed':String(selected?.dataset.path===n.path)});g.append(svgElement('title',{},n.path+' \xB7 '+n.roles.join(', ')));g.append(svgElement('rect',{x:p.x,y:p.y-26,width:300,height:59,rx:8,fill:'#202823',stroke:primary==='changed'?'#8d7245':primary==='test'?'#58708d':'#435347'}));g.append(svgElement('text',{x:p.x+14,y:p.y-4,fill:'#eff4ef','font-family':'ui-monospace,monospace','font-size':13},base.length>32?base.slice(0,31)+'\u2026':base));g.append(svgElement('text',{x:p.x+14,y:p.y+17,fill:'#a1ada5','font-family':'system-ui','font-size':11},dir.length>43?dir.slice(0,42)+'\u2026':dir));mapSvg.append(g);}
+ if(mapNote)mapNote.textContent=center?'Arrows point from importers to dependencies. Focused on '+center.dataset.path+' \xB7 '+chosen.length+' of '+visible.length+' visible candidates. Select another file to recenter.':'No matching files are visible in the map. Clear or adjust filters to explore candidates.';
+}
+function selectFile(li,focus=false){selected=li;for(const row of files){row.dataset.selected=String(row===li);row.querySelector('button').setAttribute('aria-pressed',String(row===li));}detail.replaceChildren();if(!li){detail.append(element('p','FILE INSPECTOR','eyebrow'),element('h2',files.length?'No matching files':'No changed files'),element('p',files.length?'Clear or adjust your filters to explore the comparison.':'This comparison has no file candidates. Revision and analysis details remain available below.','detail-help'));renderMap(null);return;}detail.append(element('p','SELECTED FILE','eyebrow'),element('h2',li.dataset.path));const badges=element('div',undefined,'detail-badges');for(const r of li.dataset.roles.split(','))badges.append(element('span',r,'badge '+r));detail.append(badges);section('Revision evidence',li.dataset.revisions.split(',').map(r=>r==='head'?'Present in head revision':'Present in analysis-base revision'),'No revision evidence');section('Code owners',li.dataset.owners?li.dataset.owners.split(','):[],'No matched CODEOWNERS rule');section('Related test evidence',JSON.parse(li.dataset.reasons),'No test relationship asserted');const chains=JSON.parse(li.dataset.chains),chainItems=[];for(const revision of ['base','head'])if(chains[revision]?.length>1)chainItems.push((revision==='base'?'Analysis base':'Head')+': '+chains[revision].join(' \u2192 '));section('Why this file may be affected',chainItems,'No static reverse-import chain connects this file to a changed path in these revisions');section('Immediate import relationships',JSON.parse(li.dataset.relations),'No discovered import relationships');const a=li.querySelector('a').cloneNode(true);a.className='source-button';a.textContent='Open exact revision \u2197';detail.append(a);renderMap(li.dataset.path);if(focus)detail.focus({preventScroll:window.innerWidth>760});}
+function filter(){let visible=0;for(const li of files){const show=li.dataset.path.toLowerCase().includes(search.value.toLowerCase())&&(!role.value||li.dataset.roles.split(',').includes(role.value))&&(!owner.value||li.dataset.owners.split(',').includes(owner.value));li.hidden=!show;if(show)visible++;}count.textContent=visible+(visible===1?' file shown':' files shown');empty.hidden=visible>0;reset.disabled=!(search.value||role.value||owner.value);if(!selected||selected.hidden)selectFile(files.find(li=>!li.hidden)||null);else renderMap(selected.dataset.path);}
+for(const el of [search,role,owner])el.addEventListener('input',filter);reset.addEventListener('click',()=>{search.value='';role.value='';owner.value='';filter();search.focus();});for(const li of files)li.querySelector('button').addEventListener('click',()=>selectFile(li,true));
+if(mapSvg){const inspect=event=>{const group=event.target.closest('[data-node]');if(!group)return;const li=files.find(row=>'file:'+row.dataset.path===group.dataset.node);if(li&&!li.hidden)selectFile(li,true);};mapSvg.addEventListener('click',inspect);mapSvg.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){const group=event.target.closest('[data-node]');if(group){event.preventDefault();inspect(event);}}});}
+document.addEventListener('keydown',event=>{if(event.key==='/'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.target.isContentEditable&&!['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName)){event.preventDefault();search.focus();}});filter();selectFile(files.find(li=>li.dataset.roles.split(',').includes('changed'))||files[0]||null);
 `;
 
 // src/viewer.ts
@@ -220621,7 +220836,10 @@ function sourceLink(graph, node) {
 var primaryRole = (n) => n.roles.includes("changed") ? "changed" : n.roles.includes("test") ? "test" : "impact";
 var short = (value, max) => value.length > max ? value.slice(0, max - 1) + "\u2026" : value;
 function svg(graph) {
-  const nodes = graph.nodes.slice(0, 80), lanes = ["changed", "impact", "test"], counts = [0, 0, 0];
+  const changed = new Set(graph.nodes.filter((n) => n.roles.includes("changed")).map((n) => n.id));
+  const adjacent = new Set(graph.edges.flatMap((e) => changed.has(e.from) ? [e.to] : changed.has(e.to) ? [e.from] : []));
+  const rank = (n) => changed.has(n.id) ? 0 : adjacent.has(n.id) ? 1 : n.roles.includes("test") ? 2 : 3;
+  const nodes = [...graph.nodes].sort((a, b) => rank(a) - rank(b) || compare(a.path, b.path)).slice(0, 80), lanes = ["changed", "impact", "test"], counts = [0, 0, 0];
   const positions = new Map(nodes.map((n) => {
     const lane = lanes.indexOf(primaryRole(n)), row = counts[lane]++;
     return [n.id, { x: 28 + lane * 350, y: 90 + row * 84 }];
@@ -220637,7 +220855,7 @@ function svg(graph) {
     const p = positions.get(n.id), base = import_node_path3.default.posix.basename(n.path), dir = import_node_path3.default.posix.dirname(n.path);
     return '<g class="graph-node" data-node="' + escapeHTML(n.id) + '" data-role="' + primaryRole(n) + '" tabindex="0" role="button" aria-label="' + escapeHTML("Inspect " + n.path) + '" aria-pressed="false"><title>' + escapeHTML(n.path + " \xB7 " + n.roles.join(", ")) + '</title><rect x="' + p.x + '" y="' + (p.y - 26) + '" width="300" height="59" rx="8" fill="#202823" stroke="' + (primaryRole(n) === "changed" ? "#8d7245" : primaryRole(n) === "test" ? "#58708d" : "#435347") + '"/><text x="' + (p.x + 14) + '" y="' + (p.y - 4) + '" fill="#eff4ef" font-family="ui-monospace,monospace" font-size="13">' + escapeHTML(short(base, 32)) + '</text><text x="' + (p.x + 14) + '" y="' + (p.y + 17) + '" fill="#a1ada5" font-family="system-ui" font-size="11">' + escapeHTML(short(dir === "." ? "Repository root" : dir, 43)) + "</text></g>";
   }).join("");
-  return '<svg id="map-svg" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Importers point to dependencies. ' + nodes.length + " of " + graph.nodes.length + ' candidates drawn; all files are available in the list." viewBox="0 0 1080 ' + height + '"><defs><marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#a1ada5"/></marker></defs>' + headings + edges + boxes + "</svg>";
+  return '<svg id="map-svg" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Importers point to dependencies. ' + nodes.length + " of " + graph.nodes.length + ' candidates drawn; selecting a file focuses its neighborhood." viewBox="0 0 1080 ' + height + '"><defs><marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#a1ada5"/></marker></defs>' + headings + edges + boxes + "</svg>";
 }
 var hash = (s) => (0, import_node_crypto.createHash)("sha256").update(s).digest("base64");
 function html(graph) {
@@ -220645,14 +220863,40 @@ function html(graph) {
   const owners = [...new Set(graph.nodes.flatMap((n) => n.owners))].sort();
   const badge = (role) => '<span class="badge ' + role + '">' + role + "</span>";
   const relations = (n) => graph.edges.filter((e) => e.from === n.id || e.to === n.id).map((e) => (e.from === n.id ? "Imports " : "Imported by ") + (e.from === n.id ? e.to : e.from).slice(5) + " (" + e.revision + ", " + e.kind + ")");
+  const impactPaths = (revision2) => {
+    const reverse = /* @__PURE__ */ new Map();
+    for (const edge of graph.edges) if (edge.revision === revision2) {
+      const list = reverse.get(edge.to) ?? [];
+      list.push(edge.from);
+      reverse.set(edge.to, list);
+    }
+    const paths = /* @__PURE__ */ new Map(), queue = [];
+    for (const n of graph.nodes.filter((n2) => n2.roles.includes("changed") && n2.revisions.includes(revision2)).sort((a, b) => compare(a.path, b.path))) {
+      paths.set(n.id, [n.path]);
+      queue.push(n.id);
+    }
+    for (let index = 0; index < queue.length; index++) {
+      const current = queue[index];
+      for (const dependent of (reverse.get(current) ?? []).sort((a, b) => compare(a, b))) if (!paths.has(dependent)) {
+        paths.set(dependent, [...paths.get(current), dependent.slice(5)]);
+        queue.push(dependent);
+      }
+    }
+    return paths;
+  };
+  const pathsByRevision = { base: impactPaths("base"), head: impactPaths("head") };
+  const chains = (n) => ({ base: pathsByRevision.base.get(n.id), head: pathsByRevision.head.get(n.id) });
   const rows = graph.nodes.map((n) => {
     const base = import_node_path3.default.posix.basename(n.path), dir = import_node_path3.default.posix.dirname(n.path);
-    return '<li class="file-row" data-path="' + escapeHTML(n.path) + '" data-roles="' + n.roles.join(",") + '" data-revisions="' + n.revisions.join(",") + '" data-owners="' + escapeHTML(n.owners.join(",")) + '" data-relations="' + escapeHTML(JSON.stringify(relations(n))) + '" data-reasons="' + escapeHTML(JSON.stringify(n.testReasons)) + '"><div class="file-main"><button type="button" aria-label="' + escapeHTML(n.path) + '" aria-pressed="false"><span class="basename">' + escapeHTML(base) + '</span></button><span class="directory">' + escapeHTML(dir === "." ? "Repository root" : dir) + '</span></div><div class="row-meta">' + n.roles.map(badge).join("") + '<a class="row-link" href="' + escapeHTML(sourceLink(graph, n)) + '" aria-label="' + escapeHTML("Open exact revision of " + n.path) + '" rel="noreferrer">Source \u2197</a></div><p class="relationship-summary">' + escapeHTML(relations(n).join("; ")) + "</p></li>";
+    return '<li class="file-row" data-path="' + escapeHTML(n.path) + '" data-roles="' + n.roles.join(",") + '" data-revisions="' + n.revisions.join(",") + '" data-owners="' + escapeHTML(n.owners.join(",")) + '" data-relations="' + escapeHTML(JSON.stringify(relations(n))) + '" data-reasons="' + escapeHTML(JSON.stringify(n.testReasons)) + '" data-chains="' + escapeHTML(JSON.stringify(chains(n))) + '"><div class="file-main"><button type="button" aria-label="' + escapeHTML(n.path) + '" aria-pressed="false"><span class="basename">' + escapeHTML(base) + '</span></button><span class="directory">' + escapeHTML(dir === "." ? "Repository root" : dir) + '</span></div><div class="row-meta">' + n.roles.map(badge).join("") + '<a class="row-link" href="' + escapeHTML(sourceLink(graph, n)) + '" aria-label="' + escapeHTML("Open exact revision of " + n.path) + '" rel="noreferrer">Source \u2197</a></div><p class="relationship-summary">' + escapeHTML(relations(n).join("; ")) + "</p></li>";
   }).join("");
-  const warnings = graph.warnings.map((w) => '<li class="warning"><strong>' + escapeHTML(w.code) + "</strong>" + escapeHTML(w.path ?? "") + (w.path ? ": " : "") + escapeHTML(w.detail) + "</li>").join("");
-  const stats = [["Changed paths", graph.changes.length, "changed", "From the Git comparison"], ["Potential dependents", graph.nodes.filter((n) => n.roles.includes("impact")).length, "impact", "Static reverse imports"], ["Related tests", graph.nodes.filter((n) => n.roles.includes("test")).length, "test", "Import and naming evidence"], ["Analysis warnings", graph.warnings.length, "", "Review supported scope"]].map(([label, value, role, caption]) => '<div class="stat"><span class="stat-label"><i class="dot ' + role + '" aria-hidden="true"></i>' + label + "</span><strong>" + value + "</strong><small>" + caption + "</small></div>").join("");
+  const categoryLabel = (category) => category === "expected-external" ? "Expected external exclusion" : category === "unresolved-local" ? "Unresolved local import" : category === "resource-limit" ? "Resource limit" : "Analysis uncertainty";
+  const warnings = graph.warnings.map((w) => '<li class="warning" data-category="' + (w.category ?? "analysis-uncertainty") + '"><strong>' + escapeHTML(categoryLabel(w.category ?? "analysis-uncertainty")) + " \xB7 " + escapeHTML(w.code) + "</strong>" + escapeHTML(w.path ?? "") + (w.path ? ": " : "") + escapeHTML(w.detail) + "</li>").join("");
+  const expected = graph.warnings.filter((w) => w.category === "expected-external").length, blocking = graph.warnings.length - expected;
+  const stats = [["Changed paths", graph.changes.length, "changed", "From the Git comparison"], ["Potential dependents", graph.nodes.filter((n) => n.roles.includes("impact")).length, "impact", "Static reverse imports"], ["Related tests", graph.nodes.filter((n) => n.roles.includes("test")).length, "test", "Import and naming evidence"], ["Analysis warnings", graph.warnings.length, "", "" + expected + " expected exclusions \xB7 " + blocking + " incompleteness warnings"]].map(([label, value, role, caption]) => '<div class="stat"><span class="stat-label"><i class="dot ' + role + '" aria-hidden="true"></i>' + label + "</span><strong>" + value + "</strong><small>" + caption + "</small></div>").join("");
   const complete = graph.completeness.complete;
-  const graphPanel = '<section class="panel graph-panel" aria-labelledby="map"><div class="panel-head"><div><h2 id="map">Import neighborhood</h2><p>Select a file to inspect its evidence.</p></div><span class="pill">' + graph.edges.length + ' revision edges</span></div><div class="legend"><span><i class="dot changed" aria-hidden="true"></i>Changed</span><span><i class="dot impact" aria-hidden="true"></i>Dependent</span><span><i class="dot test" aria-hidden="true"></i>Test</span><span><i class="edge-key base" aria-hidden="true"></i>Base</span><span><i class="edge-key" aria-hidden="true"></i>Head</span></div><div class="graph-scroll">' + (graph.nodes.length ? svg(graph) : '<p class="graph-empty">No candidate files in this comparison.</p>') + '</div><p class="graph-note">Arrows point from importers to dependencies. ' + (graph.nodes.length > 80 ? "First 80 of " + graph.nodes.length + " candidates drawn; use the full list for the rest." : "All " + graph.nodes.length + " candidates drawn.") + " Scroll the diagram when needed.</p></section>";
+  const mapData = escapeHTML(JSON.stringify({ nodes: graph.nodes, edges: graph.edges }));
+  const graphPanel = '<section class="panel graph-panel" aria-labelledby="map"><div class="panel-head"><div><h2 id="map">Import neighborhood</h2><p>Select a file to inspect its revision-specific impact chain.</p></div><span class="pill">' + graph.edges.length + ' revision edges</span></div><div class="legend"><span><i class="dot changed" aria-hidden="true"></i>Changed</span><span><i class="dot impact" aria-hidden="true"></i>Dependent</span><span><i class="dot test" aria-hidden="true"></i>Test</span><span><i class="edge-key base" aria-hidden="true"></i>Base</span><span><i class="edge-key" aria-hidden="true"></i>Head</span></div><div class="graph-scroll"><div id="map-data" hidden data-graph="' + mapData + '"></div>' + (graph.nodes.length ? svg(graph) : '<p class="graph-empty">No candidate files in this comparison.</p>') + '</div><p class="graph-note" id="graph-note" aria-live="polite">Arrows point from importers to dependencies. ' + (graph.nodes.length > 80 ? "The initial map prioritizes changed files; select any file in the full list to focus its neighborhood." : "Select any file to focus its neighborhood.") + " Scroll the diagram when needed.</p></section>";
   const explorer = '<section class="panel explorer" id="explorer" aria-labelledby="list"><div class="panel-head"><div><h2 id="list">Explore files</h2><p>The complete candidate list, including files outside the diagram.</p></div><span class="pill">' + graph.nodes.length + ' candidates</span></div><div class="filters"><label class="field"><span>Find a file</span><input id="search" type="search" placeholder="Search a path\u2026" autocomplete="off"></label><label class="field"><span>Role</span><select id="role" aria-label="Role"><option value="">All roles</option><option>changed</option><option>impact</option><option>test</option></select></label><label class="field"><span>Owner</span><select id="owner" aria-label="Owner"><option value="">All owners</option>' + owners.map((o) => "<option>" + escapeHTML(o) + "</option>").join("") + '</select></label><button type="button" class="reset" id="reset">Clear filters</button></div><div class="list-meta"><p id="count" role="status"></p><span>/ to search</span></div><div class="empty" id="empty" hidden><strong>' + (graph.nodes.length ? "No matching files" : "No candidate files") + "</strong><p>" + (graph.nodes.length ? "Try a different path, role, or owner." : "The comparison produced no file candidates.") + '</p></div><ul id="files">' + rows + "</ul></section>";
   const inspector = '<aside class="panel inspector" aria-label="File inspector"><div class="panel-head"><h2>File inspector</h2><span class="pill">Evidence</span></div><div id="detail" tabindex="-1" aria-label="Selected file details"><p class="detail-help">Select a file to inspect its roles, revisions, owners, and test evidence.</p></div><p class="detail-tip">Source links open the exact analyzed revision.</p></aside>';
   const audit = '<details class="panel audit"' + (!complete || warnings ? " open" : "") + "><summary>Warnings &amp; analysis details \xB7 " + graph.warnings.length + ' warnings</summary><div class="audit-body"><p>' + graph.completeness.omittedNodes + " omitted nodes \xB7 " + graph.completeness.omittedEdges + " omitted edges. " + (complete ? "Complete within supported static syntax." : "Incomplete analysis \u2014 review omissions and warnings.") + '</p><ul class="warnings">' + (warnings || "<li>No analysis warnings reported.</li>") + '</ul><details class="revision-details"><summary>Revision attribution</summary><pre>Base tip: ' + graph.change.baseTipSha + "\nAnalysis base: " + graph.change.analysisBaseSha + "\nHead: " + graph.change.headSha + "\nMode: " + graph.change.mode + '</pre></details><details class="revision-details"><summary>All changed paths, including omitted candidates</summary><ul>' + graph.changes.map((c) => "<li>" + c.status + " " + escapeHTML(c.oldPath ?? c.newPath ?? "") + (c.status === "R" ? " \u2192 " + escapeHTML(c.newPath) : "") + "</li>").join("") + "</ul></details></div></details>";
@@ -220674,11 +220918,14 @@ async function canonicalTarget(target) {
     }
   }
 }
+function outputIsOutsideRepository(root, target) {
+  const relative = import_node_path4.default.relative(root, target);
+  return relative === ".." || relative.startsWith(".." + import_node_path4.default.sep) || import_node_path4.default.isAbsolute(relative);
+}
 async function writeBundle(graph, out2, repo, generatedAt = (/* @__PURE__ */ new Date()).toISOString()) {
   validateGraph(graph);
   const target = await canonicalTarget(out2), root = await (0, import_promises.realpath)(repo);
-  const relative = import_node_path4.default.relative(root, target);
-  if (relative === "" || !relative.startsWith(".." + import_node_path4.default.sep) && relative !== ".." && !import_node_path4.default.isAbsolute(relative)) throw new Error("Output must be outside analyzed repository");
+  if (!outputIsOutsideRepository(root, target)) throw new Error("Output must be outside analyzed repository");
   try {
     await (0, import_promises.lstat)(target);
     throw new Error("Output path already exists; choose a new path");
@@ -220691,6 +220938,7 @@ async function writeBundle(graph, out2, repo, generatedAt = (/* @__PURE__ */ new
 }
 
 // src/cli.ts
+var import_promises2 = require("node:fs/promises");
 async function main(args2) {
   let values, positionals;
   try {
@@ -220700,10 +220948,10 @@ async function main(args2) {
       return 0;
     }
     if (values.help) {
-      console.log("patchripple analyze --repo PATH --base REF --head REF --repository https://github.com/owner/repo --out NEW_PATH\n[--mode pr|direct] [--python-roots .,src] [--max-nodes N] [--max-depth N] [--max-files N] [--timeout-ms N]\nOutput must be new and outside the analyzed repository. Reads Git blobs; never runs target code.");
+      console.log("patchripple doctor --repo PATH --base REF --head REF --out NEW_PATH\npatchripple analyze --repo PATH --base REF --head REF --repository https://github.com/owner/repo --out NEW_PATH\n[--mode pr|direct] [--python-roots .,src] [--max-nodes N] [--max-depth N] [--max-files N] [--timeout-ms N]\nDoctor checks Node, Git history, exact refs, and output-path safety without writing files. Output must be new and outside the analyzed repository. Target code and configuration are never run.");
       return 0;
     }
-    if (positionals.length !== 1 || positionals[0] !== "analyze" || ["repo", "base", "head", "out", "repository"].some((k) => typeof values[k] !== "string" || values[k] === "") || values.mode !== void 0 && !["pr", "direct"].includes(String(values.mode))) throw new Error("Invalid command or missing required arguments; use --help");
+    if (positionals.length !== 1 || !["analyze", "doctor"].includes(positionals[0]) || ["repo", "base", "head", "out"].some((k) => typeof values[k] !== "string" || values[k] === "") || positionals[0] === "analyze" && (typeof values.repository !== "string" || values.repository === "") || values.mode !== void 0 && !["pr", "direct"].includes(String(values.mode))) throw new Error("Invalid command or missing required arguments; use --help");
   } catch (e) {
     console.error(e.message);
     return 2;
@@ -220718,6 +220966,20 @@ async function main(args2) {
     limits[key] = n;
   }
   try {
+    if (positionals[0] === "doctor") {
+      if (Number(process.versions.node.split(".")[0]) < 24) throw new Error("Node 24 or newer is required");
+      const reader = new GitReader(String(values.repo), defaultLimits), change = reader.revisions(String(values.base), String(values.head), values.mode ?? "pr");
+      const output = await canonicalTarget(String(values.out)), repo = reader.root;
+      if (!outputIsOutsideRepository(repo, output)) throw new Error("Output path must be outside the analyzed repository");
+      try {
+        await (0, import_promises2.lstat)(output);
+        throw new Error("Output path already exists; choose a new path");
+      } catch (e) {
+        if (e.code !== "ENOENT") throw e;
+      }
+      console.log(JSON.stringify({ ready: true, node: process.versions.node, gitRepository: repo, baseTip: change.baseTipSha, analysisBase: change.analysisBaseSha, head: change.headSha, output }));
+      return 0;
+    }
     const graph = await analyze({ repo: String(values.repo), base: String(values.base), head: String(values.head), repository: String(values.repository), mode: values.mode, limits, pythonRoots: values["python-roots"] === void 0 ? void 0 : String(values["python-roots"]).split(",").map((x) => x === "." ? "" : x) });
     await writeBundle(graph, String(values.out), String(values.repo));
     console.log(JSON.stringify({ out: values.out, changes: graph.changes.length, candidates: graph.nodes.length, warnings: graph.warnings.length, complete: graph.completeness.complete }));

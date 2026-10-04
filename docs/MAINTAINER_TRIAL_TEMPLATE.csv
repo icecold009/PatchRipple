@@ -1,0 +1,4 @@
+trial_id,participant_repository,permission_to_record,pr_url,language_and_layout,tool_commit,base_tip_sha,analysis_base_sha,head_sha,expected_relationships,observed_relationships,missed_relationships,misleading_relationships,warnings_understood,installation_completed,offline_report_opened,review_focus_changed,most_useful_observation,limitation,evidence_url,observed_date,status
+1,Not selected,,,,,,,,,,,,,,,,,,,,Not started
+2,Not selected,,,,,,,,,,,,,,,,,,,,Not started
+3,Not selected,,,,,,,,,,,,,,,,,,,,Not started

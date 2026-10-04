@@ -1,4 +1,6 @@
-# Hosted verification proposal
+# Historical hosted verification proposal
+
+**Historical proposal dated 2026-10-03.** The earlier same-repository run and artifact subsequently completed; see [HOSTED_EVIDENCE.md](HOSTED_EVIDENCE.md). This proposal does not describe hosted verification of the current unpublished `codex/ui-impact-explorer` working tree. [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) is the current checklist.
 
 Approved by the user on 2026-10-03: minimal main baseline, feature publication and same-repository/fork verification scope below. Implementation merge, deployment, registry publication and outreach remain outside this approval. The connector initialized the README-only main baseline at b877db5a8a1f38eb717bb5418a7433ceba894cf8 and created codex/patchripple-implementation-plan from it. Fork creation is unavailable and an authorized existing fork is still required.
 

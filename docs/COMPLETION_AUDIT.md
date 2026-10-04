@@ -1,4 +1,6 @@
-# Completion audit against IMPLEMENTATION_PLAN.md
+# Historical completion audit against IMPLEMENTATION_PLAN.md
+
+**Historical audit snapshot, updated through 2026-10-03.** The earlier same-repository evidence is recorded in [HOSTED_EVIDENCE.md](HOSTED_EVIDENCE.md). This table predates the current local `codex/ui-impact-explorer` changes and is not the current release status; use [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) for the authoritative 2026-10-04 candidate checklist.
 
 Current update2026-10-03: user approved hosted setup; implementation CI and real same-repository JS/Python Action artifact checks now pass, including downloaded offline mobile/exact-link verification. See HOSTED_EVIDENCE.md for immutable revisions, run/artifact identities and corrected failures. Fork verification and human installation/adoption remain missing. The milestone table and pending-approval narrative below preserve the earlier local audit snapshot and are superseded for same-repository hosted evidence and approval status.
 

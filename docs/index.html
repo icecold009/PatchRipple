@@ -14,22 +14,26 @@
 <section id="install"><h2>Run locally</h2><p>Node 24 and Git are required. Build from the trusted PatchRipple checkout, not from the repository you are analyzing.</p>
 <pre><code>npm ci --ignore-scripts
 npm run verify
+node dist/cli.cjs doctor \
+  --repo /path/to/target \
+  --base BASE_COMMIT --head HEAD_COMMIT \
+  --out /path/to/new-bundle
 node dist/cli.cjs analyze \
   --repo /path/to/target \
   --base BASE_COMMIT --head HEAD_COMMIT \
   --repository https://github.com/owner/repo \
   --out /path/to/new-bundle</code></pre>
-<p>PR mode compares the merge-base of the base tip and head to head. Use <code>--mode direct</code> only when you want an explicit two-commit comparison. Fetch missing commit history before analysis. The output directory must be new and outside the analyzed repository.</p>
+<p>The read-only doctor checks Node, Git history, exact revisions, and whether the output location is new and outside the target. It does not create files. PR mode compares the merge-base of the base tip and head to head. Use <code>--mode direct</code> only when you want an explicit two-commit comparison. Fetch missing commit history before analysis.</p>
 <p>Open <code>index.html</code> from the generated bundle. It contains all required assets and data; there are no external requests. The bundle also includes graph JSON, SVG, and run metadata. The list and graph expose exact revision attribution.</p>
 <h2>Install the Action</h2><p>Use the <a href="consumer-workflow.yml.example">read-only consumer workflow template</a>. Replace <code>PATCHRIPPLE_COMMIT</code> with a reviewed published immutable commit. The placeholder is intentionally not executable installation guidance until a trusted Action commit has been published.</p><p>Fetch and verify exact base/head objects, including the base repository's PR ref for a fork. Use <code>pull_request</code>, <code>contents: read</code>, and <code>persist-credentials: false</code>. The trusted Action ships with its parser assets; it never installs dependencies or executes scripts from the target PR.</p></section>
 <section id="scope"><h2>Coverage and limits</h2><ul>
-<li>JavaScript/TypeScript literal imports, re-exports, type imports, dynamic literal imports, require, relative resolution, and bounded root tsconfig paths/baseUrl.</li>
-<li>Python static import/from, explicit source roots, relative packages, and existing initializers. Dynamic imports, wildcard symbol relationships, namespace ambiguity, and unsupported syntax are warnings.</li>
+<li>JavaScript/TypeScript literal imports, re-exports, type imports, dynamic literal imports, require, nested tsconfig with bounded in-repository relative extends, and declared npm workspace package exports.</li>
+<li>Python static import/from, explicit and common monorepo src roots, relative packages, and existing initializers. Dynamic imports, wildcard symbol relationships, namespace ambiguity, and unsupported syntax are warnings.</li>
 <li>Base/head import graphs contribute impact; removed and renamed paths keep their revision provenance. CODEOWNERS metadata comes from the base branch tip.</li>
 <li>Tests are related by imports and documented naming conventions. A related test is not coverage proof.</li>
 <li>Hard defaults: 5,000 files and 40 MiB per revision, 512 KiB per file, 500 candidates, 2,000 displayed edges, depth 20, and a 60-second Git/parsing deadline. Limits can be reduced.</li>
-</ul><p>Package/workspace imports, config extends, unsupported languages, symlinks/submodules, binary or non-UTF8 input, unresolved relationships, and truncation warn. Any warning or omission marks analysis incomplete. Exit 0 means valid output, not necessarily complete analysis.</p></section>
+</ul><p>Expected external package exclusions remain visible without alone making the graph incomplete. Unresolved local imports, unsupported configuration, parser uncertainty, and truncation are separately classified and mark the graph incomplete. Exit 0 means valid output, not necessarily complete analysis.</p></section>
 <section id="trust"><h2>Trust, data and sharing</h2><p>No target code, build scripts, executable config, hooks, project installs, database, account, or hosted analyzer is involved. Untrusted source is read as bounded inert Git blobs; output is escaped and the interactive viewer uses a hashed Content Security Policy.</p><p>Output reveals repository paths, ownership, and relationships. GitHub artifact downloads require sign-in/read access and expire according to retention settings. For an anonymous permanent URL, the repository owner publishes the static bundle separately to a host they control. Hosting terms must be checked before making a free-tier promise.</p><p>No PR comments, branch writes, deployments, or package publication happen automatically. Never use <code>pull_request_target</code>, secrets or write permissions for untrusted analysis.</p></section>
-<section><h2>Verification status</h2><p>The synthetic demo illustrates the viewer; its example SHAs are not public source revisions. Local parser/Git regressions, isolated packaging and offline desktop/mobile browser checks pass. Actual same-repository/fork Action runs and maintainer trials remain release evidence requirements.</p><p><a href="RELEASE_EVIDENCE.md">Release evidence checklist</a> · <a href="graph-schema-v1.md">Schema contract</a> · <a href="SECURITY.md">Security boundaries</a> · <a href="HOSTED_VERIFICATION.md">Hosted verification proposal</a></p></section>
+<section><h2>Verification status</h2><p>The synthetic demo illustrates the viewer; its example SHAs are not public source revisions. The versioned release checklist is the current status source. Actual fork Action behavior, maintainer trials, and screen-reader review require independent evidence.</p><p><a href="RELEASE_EVIDENCE.md">Current release evidence checklist</a> · <a href="graph-schema-v1.md">Schema contract</a> · <a href="SECURITY.md">Security boundaries</a> · <a href="HOSTED_EVIDENCE.md">Recorded hosted evidence</a></p></section>
 <footer>MIT licensed. PatchRipple is under active implementation. No unqualified V1-release or runtime-safety claim.</footer>
 </main></body></html>

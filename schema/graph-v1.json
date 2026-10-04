@@ -213,6 +213,14 @@
               "base",
               "head"
             ]
+          },
+          "category": {
+            "enum": [
+              "expected-external",
+              "unresolved-local",
+              "resource-limit",
+              "analysis-uncertainty"
+            ]
           }
         }
       }

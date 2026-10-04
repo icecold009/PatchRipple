@@ -1,7 +1,8 @@
 import { Ajv } from 'ajv';
 export type Revision = 'base' | 'head';
 export type Kind = 'static' | 'type-only' | 'dynamic-literal' | 'require' | 'python';
-export interface Warning { code: string; path?: string; revision?: Revision; detail: string }
+export type WarningCategory = 'expected-external' | 'unresolved-local' | 'resource-limit' | 'analysis-uncertainty';
+export interface Warning { code: string; path?: string; revision?: Revision; detail: string; category?: WarningCategory }
 export interface Change { status: 'A'|'M'|'D'|'R'|'T'; oldPath?: string; newPath?: string }
 export interface Edge { from: string; to: string; kind: Kind; revision: Revision }
 export interface FileNode { id: string; path: string; roles: ('changed'|'impact'|'test')[]; revisions: Revision[]; owners: string[]; testReasons: string[] }
@@ -22,7 +23,7 @@ const properties={
  changes:{type:'array',items:{type:'object',additionalProperties:false,required:['status'],properties:{status:{enum:['A','M','D','R','T']},oldPath:str,newPath:str}}},
  nodes:{type:'array',items:{type:'object',additionalProperties:false,required:['id','path','roles','revisions','owners','testReasons'],properties:{id:str,path:str,roles:{type:'array',uniqueItems:true,items:{enum:['changed','impact','test']}},revisions:{type:'array',minItems:1,uniqueItems:true,items:revision},owners:{type:'array',uniqueItems:true,items:str},testReasons:{type:'array',uniqueItems:true,items:str}}}},
  edges:{type:'array',items:{type:'object',additionalProperties:false,required:['from','to','kind','revision'],properties:{from:str,to:str,revision,kind:{enum:['static','type-only','dynamic-literal','require','python']}}}},
- warnings:{type:'array',items:{type:'object',additionalProperties:false,required:['code','detail'],properties:{code:str,detail:str,path:str,revision}}},
+ warnings:{type:'array',items:{type:'object',additionalProperties:false,required:['code','detail'],properties:{code:str,detail:str,path:str,revision,category:{enum:['expected-external','unresolved-local','resource-limit','analysis-uncertainty']}}}},
  completeness:{type:'object',additionalProperties:false,required:['complete','omittedNodes','omittedEdges'],properties:{complete:{type:'boolean'},omittedNodes:{type:'integer',minimum:0},omittedEdges:{type:'integer',minimum:0}}},
  limits:{type:'object',additionalProperties:false,required:Object.keys(defaultLimits),properties:Object.fromEntries(Object.keys(defaultLimits).map(k=>[k,{type:'integer',minimum:1}]))}
 };
@@ -39,6 +40,7 @@ export function repositoryUrl(s:string): string {
 export function validateGraph(input:unknown): asserts input is Graph {
  if(!validate(input)) throw new Error('Invalid graph schema: '+JSON.stringify(validate.errors));
  const g=input as unknown as Graph; repositoryUrl(g.repository.url);
+ for(const warning of g.warnings)if(warning.category!==undefined&&warning.category!==warningCategory(warning))throw new Error('Warning category does not match its code');
  const nodes=new Map<string,FileNode>();
  for(const n of g.nodes){if(!safePath(n.path)||n.id!=='file:'+n.path||nodes.has(n.id))throw new Error('Invalid or duplicate node path');nodes.set(n.id,n);}
  for(const c of g.changes){
@@ -49,7 +51,13 @@ export function validateGraph(input:unknown): asserts input is Graph {
  for(const e of g.edges){const a=nodes.get(e.from),b=nodes.get(e.to);const key=JSON.stringify(e);
   if(!a||!b||!a.revisions.includes(e.revision)||!b.revisions.includes(e.revision)||edgeKeys.has(key)) throw new Error('Invalid edge endpoints/revision or duplicate edge');edgeKeys.add(key);}
  if(g.nodes.length>g.limits.maxNodes||g.edges.length>g.limits.maxEdges)throw new Error('Graph exceeds declared limits');
- if(g.completeness.complete && (g.warnings.length||g.completeness.omittedNodes||g.completeness.omittedEdges))throw new Error('Incomplete graph cannot claim completeness');
+ if(g.completeness.complete && (g.warnings.some(w=>warningCategory(w)!=='expected-external')||g.completeness.omittedNodes||g.completeness.omittedEdges))throw new Error('Incomplete graph cannot claim completeness');
 }
 export const compare=(a:string,b:string)=>a<b?-1:a>b?1:0;
 export const nodeId=(p:string)=>'file:'+p;
+export function warningCategory(w:Warning):WarningCategory {
+ if(w.code==='EXPECTED_EXTERNAL_IMPORT')return 'expected-external';
+ if(w.code==='UNRESOLVED_IMPORT'||w.code==='UNRESOLVED_WORKSPACE_IMPORT')return 'unresolved-local';
+ if(w.code==='TIME_LIMIT'||/(?:^|_)LIMIT$/.test(w.code))return 'resource-limit';
+ return 'analysis-uncertainty';
+}

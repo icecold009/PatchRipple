@@ -23,6 +23,17 @@ jobs:
       - run: npm run demo
       - run: git diff --exit-code -- dist schema docs/demo
       - run: npm run test:package
+      - run: npm run test:browser:fixtures
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:browser
         env:
-          PATCHRIPPLE_BROWSER_CHANNEL: chrome
+          PATCHRIPPLE_BROWSER: chromium
+          PATCHRIPPLE_EDGE_FIXTURES: .tmp/browser-edge-fixtures
+      - run: npm run test:browser
+        env:
+          PATCHRIPPLE_BROWSER: firefox
+          PATCHRIPPLE_EDGE_FIXTURES: .tmp/browser-edge-fixtures
+      - run: npm run test:browser
+        env:
+          PATCHRIPPLE_BROWSER: webkit
+          PATCHRIPPLE_EDGE_FIXTURES: .tmp/browser-edge-fixtures

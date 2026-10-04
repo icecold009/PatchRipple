@@ -4,6 +4,18 @@ See what a pull request may affect. PatchRipple analyzes Git blobs inside your c
 
 **Static candidates are possibilities, not runtime effects, coverage, or proof that a change is safe.** Warnings and omissions remain visible. No target code, scripts, executable configuration, project installs, or network analyzer runs.
 
+## Quick start
+
+Use Node 24+, Git, a trusted PatchRipple checkout, exact commit SHAs already available in the target repository, and a new output path outside that repository. Run the read-only diagnostic first:
+
+```sh
+node /path/to/PatchRipple/dist/cli.cjs doctor \
+  --repo /path/to/target --base BASE_COMMIT --head HEAD_COMMIT \
+  --out /path/to/new-offline-bundle
+```
+
+Then replace `doctor` with `analyze` and add `--repository https://github.com/OWNER/REPO` to produce the four-file offline report. If the doctor says a commit is unavailable, fetch the required history yourself; PatchRipple will not run repository scripts or change the target checkout. The doctor does not create output files.
+
 ## Local development
 
 Node 24 and Git are required. In this trusted PatchRipple checkout:
@@ -43,17 +55,18 @@ Workflow artifacts require GitHub sign-in and repository read access to download
 ## Supported scope and uncertainty
 
 - JS/JSX/TS/TSX/MJS/CJS/MTS/CTS: literal imports, re-exports, type imports, dynamic literal imports and require. Dynamic expressions and parse errors warn.
-- Relative extension/index resolution and bounded root tsconfig JSON paths/baseUrl. Emitted .js/.jsx paths substitute TS/TSX/declarations; .mjs/.cjs require explicit extensions. Aliases use exact matches before the longest wildcard prefix. Executable config and extends are never loaded. Package/workspace relationships and directory package metadata are excluded with visible warnings.
-- Python: static import/from, relative levels, existing package initializers and explicit source roots (default root and src). Dynamic/wildcard imports, namespace ambiguity, unsupported syntax and unresolved/external modules warn. Set `--python-roots .,src` explicitly for your layout.
+- Relative extension/index resolution; nearest nested tsconfig JSON with bounded in-repository relative `extends`, `baseUrl`, and `paths`; and declared npm workspaces with static package `exports`, `main`, `module`, `types`, or `typings` entries. No config code or package install is run. Conditional exports resolve only the documented static condition subset; unsupported or missing local targets remain visible warnings.
+- Expected external package imports remain visible as exclusions without making an otherwise complete local graph incomplete. Unresolved local/workspace imports, unsupported configuration, parser uncertainty, and resource limits are separately classified and make the graph incomplete.
+- Python: static import/from, relative levels, existing package initializers, explicit source roots (default root and src), and common `packages/*/src` roots discovered through package initializers. Dynamic/wildcard imports, namespace ambiguity, unsupported syntax and unresolved relative imports warn. Set `--python-roots .,src` explicitly for other layouts.
 - Both base/head graphs contribute impact. Removed files and old rename paths keep base attribution and links.
 - Tests use importing test files and documented adjacent/naming conventions; testReasons describe heuristic evidence.
 - Base CODEOWNERS precedence .github, root, docs; last matching supported rule. Supported subset: directory patterns, *, **, ?, @user/@team and email owners; negative patterns, character classes, escapes and malformed rules warn. No team membership lookup.
-- Symlinks/submodules, binaries, unsupported source languages and limits warn. Any warning or known omission marks analysis incomplete.
+- Symlinks/submodules, binaries, unsupported source languages and limits warn. Expected external exclusions remain visible without alone marking a graph incomplete; other uncertainty and omissions do.
 
-Default hard ceilings per revision: 5,000 files, 40 MiB aggregate source, 512 KiB/file; displayed candidates 500 nodes/2,000 edges/depth 20; analysis Git/parsing deadline 60 seconds. CLI limits can reduce these ceilings, never raise them. The diagram shows at most 80 nodes; the searchable full list retains the remaining included candidates. Omitted counts describe encountered candidates, not undiscovered descendants.
+Default hard ceilings per revision: 5,000 files, 40 MiB aggregate source, 512 KiB/file; displayed candidates 500 nodes/2,000 edges/depth 20; analysis Git/parsing deadline 60 seconds. CLI limits can reduce these ceilings, never raise them. The diagram shows at most 80 nodes and recenters around any visible list selection, including files outside its initial view. Changed files and their nearby candidates rank first. Omitted counts describe encountered candidates, not undiscovered descendants.
 
 ## Verification and release
 
-`npm test` exercises real temporary Git histories, parser fixtures, deletion/rename attribution, bounds, output collisions, malformed data, escaping and deterministic output. `npm run demo` builds a synthetic offline example. The implementation plan and [release evidence](docs/RELEASE_EVIDENCE.md) distinguish passing local checks from missing hosted/browser/adoption evidence.
+`npm test` exercises real temporary Git histories, parser fixtures, deletion/rename attribution, bounds, output collisions, malformed data, escaping and deterministic output. `npm run test:browser:fixtures` generates empty, incomplete, and 85-candidate offline reports consumed by the browser check and CI. `npm run demo` builds a synthetic offline example. The [release evidence](docs/RELEASE_EVIDENCE.md) is the current dated checklist; actual fork runs, maintainer trials, and screen-reader review remain distinct external evidence.
 
 MIT licensed. Third-party assets retain their own licenses in dist/THIRD_PARTY_NOTICES.txt. No registry publication, deployment, automatic writes, hosted analysis service or unconditional free-tier promise.

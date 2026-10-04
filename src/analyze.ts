@@ -1,7 +1,7 @@
 import {GitReader,Snapshot} from './git.js';
 import {scan} from './scan.js';
 import {compileOwners} from './owners.js';
-import {Graph,Limits,defaultLimits,Warning,Revision,Edge,FileNode,compare,nodeId,repositoryUrl,safePath,validateGraph} from './model.js';
+import {Graph,Limits,defaultLimits,Warning,Revision,Edge,FileNode,compare,nodeId,repositoryUrl,safePath,validateGraph,warningCategory} from './model.js';
 import path from 'node:path';
 export interface Options {repo:string;base:string;head:string;repository:string;mode?:'pr'|'direct';limits?:Partial<Limits>;pythonRoots?:string[];pullRequest?:number}
 export async function analyze(options:Options):Promise<Graph>{
@@ -58,7 +58,7 @@ export async function analyze(options:Options):Promise<Graph>{
  const edges:Edge[]=edgeCandidates.slice(0,limits.maxEdges);const omittedEdges=edgeCandidates.length-edges.length;
  if(omittedNodes)warnings.push({code:'NODE_LIMIT',detail:omittedNodes+' candidate nodes omitted'});
  if(omittedEdges)warnings.push({code:'EDGE_LIMIT',detail:omittedEdges+' candidate edges omitted'});
- const uniqueWarnings=[...new Map(warnings.map(w=>[JSON.stringify(w),w])).values()].sort((a,b)=>compare(JSON.stringify(a),JSON.stringify(b)));
- const graph:Graph={schemaVersion:1,repository:{name:new URL(url).pathname.slice(1),url},change,changes,nodes,edges,warnings:uniqueWarnings,completeness:{complete:uniqueWarnings.length===0,omittedNodes,omittedEdges},limits};
+ const uniqueWarnings=[...new Map(warnings.map(w=>{const classified={...w,category:warningCategory(w)};return [JSON.stringify(classified),classified] as const;})).values()].sort((a,b)=>compare(JSON.stringify(a),JSON.stringify(b)));
+ const graph:Graph={schemaVersion:1,repository:{name:new URL(url).pathname.slice(1),url},change,changes,nodes,edges,warnings:uniqueWarnings,completeness:{complete:uniqueWarnings.every(w=>w.category==='expected-external'),omittedNodes,omittedEdges},limits};
  validateGraph(graph);return graph;
 }

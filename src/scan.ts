@@ -69,44 +69,150 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
  const edges:Edge[]=[],warnings=[...snapshot.warnings];const edgeSet=new Set<string>();
  const warn=(code:string,p:string,detail:string)=>warnings.push({code,path:p,revision,detail});
  const add=(from:string,to:string,kind:Kind)=>{const e={from:nodeId(from),to:nodeId(to),kind,revision};const key=JSON.stringify(e);if(!edgeSet.has(key)){edgeSet.add(key);edges.push(e);}};
- let config: {baseUrl?:string;paths?:Record<string,string[]>}={};
- const configText=snapshot.files.get('tsconfig.json');
- if(configText){
-  const parsed=ts.parseConfigFileTextToJson('tsconfig.json',configText);
-  if(parsed.error)warn('CONFIG_UNSUPPORTED','tsconfig.json','Invalid tsconfig JSON');
-  else if(parsed.config&&typeof parsed.config==='object'){
-   if(parsed.config.extends)warn('CONFIG_UNSUPPORTED','tsconfig.json','External extends is not followed');
-   const opts=parsed.config.compilerOptions;
-   if(opts&&typeof opts==='object'){
-    if(typeof opts.baseUrl==='string'){const base=path.posix.normalize(opts.baseUrl);if(base==='.'||safePath(base))config.baseUrl=base==='.'?'':base;else warn('CONFIG_UNSUPPORTED','tsconfig.json','Unsafe baseUrl ignored');}
-    if(opts.paths&&typeof opts.paths==='object')config.paths=opts.paths;
+ type Rule={pattern:string;values:string[];base:string};
+ type Config={baseUrl?:string;rules:Rule[]};
+ const packageFiles=[...snapshot.files].filter(([p])=>p.endsWith('/package.json')||p==='package.json');
+ const packageDirs=new Map<string,Record<string,unknown>>();
+ for(const [p,text] of packageFiles){try{const value=JSON.parse(text);if(!value||typeof value!=='object'||Array.isArray(value))continue;const dir=p==='package.json'?'':path.posix.dirname(p);packageDirs.set(dir,value);}catch{warn('CONFIG_UNSUPPORTED',p,'Invalid package.json; package metadata was ignored');}}
+ const rootManifest=packageDirs.get('')??{};
+ const workspaceObject=rootManifest.workspaces&&typeof rootManifest.workspaces==='object'&&!Array.isArray(rootManifest.workspaces)?rootManifest.workspaces as {packages?:unknown}:undefined;
+ const workspaceFieldValid=Array.isArray(rootManifest.workspaces)||!!workspaceObject&&Array.isArray(workspaceObject.packages);
+ const workspacesRaw=Array.isArray(rootManifest.workspaces)?rootManifest.workspaces:workspaceFieldValid?(workspaceObject!.packages as string[]):[];
+ if(rootManifest.workspaces!==undefined&&!workspaceFieldValid)warn('CONFIG_UNSUPPORTED','package.json','Workspace declarations must be a string array or an object with a packages array');
+ const workspaces=new Map<string,{dir:string;manifest:Record<string,unknown>}>();
+ const ambiguousWorkspaces=new Set<string>();
+ for(const pattern of workspacesRaw)if(typeof pattern!=='string'||pattern.includes('{')||pattern.includes('[')||pattern.includes(']')||pattern==='!')warn('CONFIG_UNSUPPORTED','package.json','Unsupported workspace pattern: '+String(pattern));
+ const globMatches=(pattern:string,value:string):boolean=>{
+  const normalized=pattern.replace(/^!/, '').replace(/^\.\//,'').replace(/\/$/,'');
+  if(!safePath(normalized.replaceAll('*','x').replaceAll('?','x')))return false;
+  if(normalized.includes('[')||normalized.includes(']'))return false;
+  const escaped=normalized.replace(/[.+^${}()|\\]/g,'\\$&').replaceAll('**','\u0000').replaceAll('*','[^/]*').replaceAll('?','[^/]');
+  return new RegExp('^'+escaped.replaceAll('\u0000','.*')+'$').test(value);
+ };
+ for(const [dir,manifest] of packageDirs){
+  if(!dir||typeof manifest.name!=='string')continue;
+  const patterns=workspacesRaw.filter((pattern):pattern is string=>typeof pattern==='string'),included=patterns.some(pattern=>!pattern.startsWith('!')&&globMatches(pattern,dir)),excluded=patterns.some(pattern=>pattern.startsWith('!')&&globMatches(pattern,dir));
+  if(included&&!excluded){if(workspaces.has(manifest.name)&&workspaces.get(manifest.name)!.dir!==dir){ambiguousWorkspaces.add(manifest.name);workspaces.delete(manifest.name);warn('CONFIG_UNSUPPORTED','package.json','Duplicate workspace package name is ambiguous: '+manifest.name);}else if(!ambiguousWorkspaces.has(manifest.name))workspaces.set(manifest.name,{dir,manifest});}
+ }
+ const configCache=new Map<string,Config>();
+ const resolvingConfigs=new Set<string>();
+ const configFileFor=(from:string):string|undefined=>{
+  let dir=path.posix.dirname(from);
+  while(dir!=='.'){
+   const candidate=dir+'/tsconfig.json';if(snapshot.files.has(candidate))return candidate;
+   const parent=path.posix.dirname(dir);if(parent===dir)break;dir=parent;
+  }
+  return snapshot.files.has('tsconfig.json')?'tsconfig.json':undefined;
+ };
+ const resolveConfig=(file:string,depth=0):Config=>{
+  const cached=configCache.get(file);if(cached)return cached;
+  if(depth>=8||resolvingConfigs.has(file)){warn('CONFIG_UNSUPPORTED',file,'TypeScript config inheritance is cyclic or exceeds eight levels');return {rules:[]};}
+  resolvingConfigs.add(file);let result:Config={rules:[]};
+  const text=snapshot.files.get(file),parsed=text?ts.parseConfigFileTextToJson(file,text):undefined;
+  if(!parsed||parsed.error||!parsed.config||typeof parsed.config!=='object')warn('CONFIG_UNSUPPORTED',file,'Invalid TypeScript config JSON');
+  else {
+   const config=parsed.config as Record<string,unknown>;const parentPaths=typeof config.extends==='string'?[config.extends]:Array.isArray(config.extends)?config.extends.filter((v):v is string=>typeof v==='string'):[];
+   if(config.extends!==undefined&&(!Array.isArray(config.extends)&&typeof config.extends!=='string'||Array.isArray(config.extends)&&parentPaths.length!==config.extends.length))warn('CONFIG_UNSUPPORTED',file,'Unsupported TypeScript extends value');
+   for(const parent of parentPaths){
+    if(!parent.startsWith('.')||parent.includes('\\')){warn('CONFIG_UNSUPPORTED',file,'External TypeScript extends is not followed: '+parent);continue;}
+    const base=path.posix.normalize(path.posix.join(path.posix.dirname(file),parent));
+    if(!safePath(base)){warn('CONFIG_UNSUPPORTED',file,'Unsafe TypeScript extends path ignored');continue;}
+    const candidate=snapshot.files.has(base)?base:snapshot.files.has(base+'.json')?base+'.json':snapshot.files.has(base+'/tsconfig.json')?base+'/tsconfig.json':undefined;
+    if(candidate){const inherited=resolveConfig(candidate,depth+1),merged=new Map(result.rules.map(rule=>[rule.pattern,rule]));for(const rule of inherited.rules)merged.set(rule.pattern,rule);result={baseUrl:inherited.baseUrl??result.baseUrl,rules:[...merged.values()]};}
+    else warn('CONFIG_UNSUPPORTED',file,'Relative TypeScript extends target was not found: '+parent);
+   }
+   const options=config.compilerOptions;
+   if(options!==undefined&&(!options||typeof options!=='object'||Array.isArray(options)))warn('CONFIG_UNSUPPORTED',file,'compilerOptions must be an object');
+   else if(options&&typeof options==='object'){
+    const compiler=options as Record<string,unknown>;let ruleBase=result.baseUrl??path.posix.dirname(file);
+    if(typeof compiler.baseUrl==='string'){
+     const next=path.posix.normalize(path.posix.join(path.posix.dirname(file),compiler.baseUrl));
+     if(next===''||next==='.')result.baseUrl='';else if(safePath(next))result.baseUrl=next;else warn('CONFIG_UNSUPPORTED',file,'Unsafe baseUrl ignored');
+     ruleBase=result.baseUrl??path.posix.dirname(file);
+    }
+    if(compiler.paths!==undefined){
+     if(!compiler.paths||typeof compiler.paths!=='object'||Array.isArray(compiler.paths))warn('CONFIG_UNSUPPORTED',file,'paths must be an object');
+     else for(const [pattern,value] of Object.entries(compiler.paths as Record<string,unknown>)){
+      if(pattern.split('*').length>2||!Array.isArray(value)||!value.every(v=>typeof v==='string')){warn('CONFIG_UNSUPPORTED',file,'Unsupported paths rule: '+pattern);continue;}
+      const values=(value as string[]).map(v=>path.posix.normalize(path.posix.join(ruleBase,v))).filter(safePath);
+      result.rules=result.rules.filter(rule=>rule.pattern!==pattern);result.rules.push({pattern,values,base:ruleBase});
+     }
+    }
    }
   }
- }
+  resolvingConfigs.delete(file);result.rules.sort((a,b)=>Number(a.pattern.includes('*'))-Number(b.pattern.includes('*'))||b.pattern.split('*')[0].length-a.pattern.split('*')[0].length||compare(a.pattern,b.pattern));configCache.set(file,result);return result;
+ };
+ const effectiveConfig=(from:string):Config=>{const file=configFileFor(from);return file?resolveConfig(file):{rules:[]};};
+ const resolveManifestTarget=(dir:string,manifest:Record<string,unknown>,subpath:string):string|undefined=>{
+  let target:string|undefined,exportMiddle='';const exportsValue=manifest.exports;
+  if(exportsValue!==undefined){
+   let value:unknown=exportsValue;
+   if(typeof value==='object'&&value!==null&&!Array.isArray(value)){
+    const exportsObject=value as Record<string,unknown>;
+    if(Object.keys(exportsObject).some(key=>key.startsWith('.'))){
+     const key=subpath?'./'+subpath:'.';value=exportsObject[key];
+     if(value===undefined)for(const [pattern,entry] of Object.entries(exportsObject)){
+      const star=pattern.indexOf('*');if(star<0||pattern.indexOf('*',star+1)>=0)continue;
+      const prefix=pattern.slice(0,star),suffix=pattern.slice(star+1);
+      if(key.startsWith(prefix)&&key.endsWith(suffix)&&key.length>=prefix.length+suffix.length){value=entry;exportMiddle=key.slice(prefix.length,key.length-suffix.length);break;}
+     }
+    }else if(!subpath)value=exportsObject;
+    else value=undefined;
+   }else if(subpath)value=undefined;
+   const pick=(v:unknown):string|undefined=>{
+    if(typeof v==='string')return v;
+    if(Array.isArray(v)){for(const item of v){const found=pick(item);if(found)return found;}return;}
+    if(v&&typeof v==='object'){
+     const conditions=v as Record<string,unknown>;
+     for(const condition of ['import','default','node','require','types']){const found=pick(conditions[condition]);if(found)return found;}
+    }
+   };
+   target=pick(value);
+   if(target&&exportMiddle)target=target.replaceAll('*',exportMiddle);
+  }else if(subpath)target='./'+subpath;
+  else for(const key of ['module','main','types','typings'])if(typeof manifest[key]==='string'){target=manifest[key] as string;break;}
+  if(!target&&!subpath&&exportsValue===undefined)target='./index';
+  if(target&&exportsValue===undefined&&!target.startsWith('./')){if(target.startsWith('/')||target.startsWith('..'))return;target='./'+target;}
+  if(!target||!target.startsWith('./')||target.includes('\\'))return;
+  const relative=path.posix.normalize(path.posix.join(dir,target.slice(2)));return safePath(relative)?relative:undefined;
+ };
+ const resolvePackagePath=(dir:string,manifest:Record<string,unknown>,subpath:string):string|undefined=>{
+  const target=resolveManifestTarget(dir,manifest,subpath);if(!target)return;
+  for(const candidate of candidates(target))if(snapshot.files.has(candidate))return candidate;
+ };
+ const packageNameAndSubpath=(spec:string):{name:string;subpath:string}=>{
+  const parts=spec.split('/');const count=spec.startsWith('@')?2:1;return {name:parts.slice(0,count).join('/'),subpath:parts.slice(count).join('/')};
+ };
+ const resolveWorkspace=(from:string,spec:string):string|undefined=>{
+  const {name,subpath}=packageNameAndSubpath(spec);if(ambiguousWorkspaces.has(name)){warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Duplicate workspace package name is ambiguous: '+name);return;}const pkg=workspaces.get(name);if(!pkg)return;
+  const result=resolvePackagePath(pkg.dir,pkg.manifest,subpath);if(!result)warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Workspace import does not resolve through the package export map: '+spec);return result;
+ };
+ const resolveDirectoryPackage=(from:string,dir:string):string|undefined=>{
+  const manifest=packageDirs.get(dir);if(!manifest)return;
+  const result=resolvePackagePath(dir,manifest,'');if(!result)warn('CONFIG_UNSUPPORTED',from,'Package entry cannot be resolved safely from '+dir+'/package.json');return result;
+ };
  const resolveJS=(from:string,spec:string):string|undefined=>{
   if(spec.includes('\\')||spec.includes('\0')){warn('UNRESOLVED_IMPORT',from,'Unsafe import path');return;}
-  const bases:string[]=[];let local=spec.startsWith('.');
+  const config=effectiveConfig(from);const bases:string[]=[];let local=spec.startsWith('.');let alias=false;
   if(local)bases.push(path.posix.join(path.posix.dirname(from),spec));
   else {
-   const matches:{pattern:string;values:string[];prefix:string;suffix:string|undefined}[]=[];
-   for(const [pattern,values] of Object.entries(config.paths??{})){
-    if(!Array.isArray(values)||!values.every(x=>typeof x==='string')||pattern.split('*').length>2){warn('CONFIG_UNSUPPORTED','tsconfig.json','Unsupported paths rule');continue;}
-    const [prefix,suffix]=pattern.split('*');const match=suffix===undefined?spec===pattern:spec.startsWith(prefix)&&spec.endsWith(suffix)&&spec.length>=prefix.length+suffix.length;
-    if(match)matches.push({pattern,values,prefix,suffix});
+   const matches:Rule[]=[];
+   for(const rule of config.rules){const [prefix,suffix]=rule.pattern.split('*');const match=suffix===undefined?spec===rule.pattern:spec.startsWith(prefix)&&spec.endsWith(suffix)&&spec.length>=prefix.length+suffix.length;if(match)matches.push(rule);
    }
-   matches.sort((a,b)=>Number(b.suffix===undefined)-Number(a.suffix===undefined)||b.prefix.length-a.prefix.length||compare(a.pattern,b.pattern));
-   const rule=matches[0];if(rule){local=true;const middle=rule.suffix===undefined?'':spec.slice(rule.prefix.length,spec.length-rule.suffix.length);for(const target of rule.values){if(target.split('*').length>2){warn('CONFIG_UNSUPPORTED','tsconfig.json','Unsupported paths substitution');continue;}bases.push(path.posix.join(config.baseUrl??'',target.replace('*',middle)));}}
+   const rule=matches[0];if(rule){local=true;alias=true;const [prefix,suffix]=rule.pattern.split('*');const middle=suffix===undefined?'':spec.slice(prefix.length,spec.length-suffix.length);for(const target of rule.values)bases.push(target.replace('*',middle));}
    if(config.baseUrl!==undefined)bases.push(path.posix.join(config.baseUrl,spec));
   }
-  for(const b of bases){if(!safePath(b))continue;if(snapshot.paths.has(b+'/package.json')){warn('PACKAGE_DIRECTORY_UNSUPPORTED',from,'Directory package metadata is not resolved: '+spec);continue;}for(const c of candidates(b))if(snapshot.files.has(c))return c;}
-  if(local)warn('UNRESOLVED_IMPORT',from,'Cannot resolve '+spec);
-  else if(!spec.startsWith('node:'))warn('EXTERNAL_OR_WORKSPACE_IMPORT',from,'Package/workspace import excluded: '+spec);
+  for(const b of bases){if(!safePath(b)&&b!=='.')continue;if(packageDirs.has(b)){const result=resolveDirectoryPackage(from,b);if(result)return result;continue;}for(const c of candidates(b))if(snapshot.files.has(c))return c;}
+  const workspaceName=packageNameAndSubpath(spec).name,knownWorkspace=workspaces.has(workspaceName);
+  if(!local){const workspace=resolveWorkspace(from,spec);if(workspace)return workspace;if(knownWorkspace)return;}
+  if(local||alias)warn('UNRESOLVED_IMPORT',from,'Cannot resolve local import '+spec);
+  else if(!spec.startsWith('node:')&&!knownWorkspace)warn('EXPECTED_EXTERNAL_IMPORT',from,'External package is excluded from the local import graph: '+spec);
  };
  const resolvePy=(from:string,imp:Import):string[]=>{
   const rel=imp.name.match(/^\.+/)?.[0].length??0;const name=imp.name.slice(rel).replaceAll('.','/');
   let bases:string[];
   if(rel){let dir=path.posix.dirname(from);for(let i=1;i<rel;i++)dir=path.posix.dirname(dir);bases=[path.posix.join(dir,name)];}
-  else bases=roots.map(root=>path.posix.join(root,name));
+  else bases=pythonRoots.map(root=>path.posix.join(root,name));
   const found:string[]=[];let matchedBases=0;
   for(const b of new Set(bases)){
    if(!safePath(b)&&b!=='.')continue;
@@ -117,11 +223,15 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
    else if(children.length)warn('AMBIGUOUS_NAMESPACE',from,'Namespace package excluded: '+imp.name);
   }
   if(matchedBases>1&&!rel){warn('AMBIGUOUS_IMPORT',from,'Multiple Python source roots match '+imp.name);return [];}
-  if(!found.length){warn(rel?'UNRESOLVED_IMPORT':'EXTERNAL_OR_UNRESOLVED_PYTHON',from,'Python module excluded/unresolved: '+imp.name);return [];}
+  if(!found.length){warn(rel?'UNRESOLVED_IMPORT':'EXPECTED_EXTERNAL_IMPORT',from,(rel?'Unresolved relative Python module: ':'External Python package is excluded from the local import graph: ')+imp.name);return [];}
   // Include existing package initializers along an explicitly resolved module path.
   for(const p of [...found]){let dir=path.posix.dirname(p);while(dir!=='.'){const init=dir+'/__init__.py';if(snapshot.files.has(init))found.push(init);dir=path.posix.dirname(dir);}}
   return [...new Set(found)];
  };
+ const detectedRoots=[...roots];
+ for(const p of snapshot.files.keys())if(p.endsWith('/__init__.py')){const parts=p.split('/');const index=parts.lastIndexOf('src');if(index>0){const root=parts.slice(0,index+1).join('/');if(!detectedRoots.includes(root))detectedRoots.push(root);}}
+ const pythonRoots=detectedRoots.sort(compare);
+ for(const p of snapshot.files.keys())if(/(?:^|\/)tsconfig\.json$/.test(p))resolveConfig(p);
  for(const [p,source] of [...snapshot.files].sort(([a],[b])=>compare(a,b))){
   if(Date.now()>deadline){warn('TIME_LIMIT',p,'Parsing stopped at analysis deadline');break;}
   if(js.test(p)){

@@ -2,7 +2,7 @@ import {chromium,firefox,webkit} from 'playwright';
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 import path from 'node:path';
-import {mkdir} from 'node:fs/promises';
+import {mkdir,readFile} from 'node:fs/promises';
 // Browser plugin/skill absent in this session; use development-only Playwright.
 const browserName=process.env.PATCHRIPPLE_BROWSER||'chromium';
 const browserType={chromium,firefox,webkit}[browserName];if(!browserType)throw new Error('PATCHRIPPLE_BROWSER must be chromium, firefox, or webkit');
@@ -46,10 +46,17 @@ try{
    if(name==='incomplete'){assert.ok(await page.getByText('Incomplete analysis',{exact:true}).isVisible());assert.equal(await page.locator('.audit').getAttribute('open'),'');assert.match(await page.locator('.audit-body').textContent(),/omitted nodes/);assert.equal(await page.locator('.warning').getAttribute('data-category'),'resource-limit');}
   }
  }
- if(!process.env.PATCHRIPPLE_DEMO_PATH){await page.goto(pathToFileURL(path.resolve('docs/index.html')).href);
+ if(!process.env.PATCHRIPPLE_DEMO_PATH){const readme=await readFile(path.resolve('README.md'),'utf8');assert.match(readme,/!\[[^\]]+\]\(docs\/demo\/preview\.gif\)/);const preview=await readFile(path.resolve('docs/demo/preview.gif'));assert.match(preview.subarray(0,6).toString('ascii'),/^GIF8[79]a$/);assert.ok(preview.length<1_000_000);
+ await page.goto(pathToFileURL(path.resolve('docs/index.html')).href);
  assert.match(await page.title(),/repo-local PR impact maps/);assert.ok(await page.getByRole('heading',{name:'Run locally',exact:true}).isVisible());
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
- await page.getByRole('link',{name:'Offline demo',exact:true}).click();assert.equal(await page.locator('#count').textContent(),'4 files shown');}
+ await page.getByRole('link',{name:'60-second guided demo',exact:true}).click();
+ assert.match(await page.title(),/Guided demo/);assert.match(await page.locator('h1').textContent(),/One changed file/);
+ assert.equal(await page.locator('.metric').count(),3);assert.equal(await page.locator('#impact-map .edge.test').count(),1);
+ const importStep=page.getByRole('button',{name:/Follow imports/});await importStep.focus();await page.keyboard.press('Enter');assert.equal(await importStep.getAttribute('aria-current'),'step');assert.equal(await page.locator('#impact-map').getAttribute('data-step'),'2');assert.match(await page.locator('#walkthrough-explanation').textContent(),/src\/core\.ts ← src\/api\.ts ← src\/ui\.ts/);
+ const testStep=page.getByRole('button',{name:/Inspect test evidence/});await testStep.focus();await page.keyboard.press('Enter');assert.equal(await testStep.getAttribute('aria-current'),'step');assert.equal(await page.locator('#impact-map').getAttribute('data-step'),'3');assert.match(await page.locator('#walkthrough-explanation').textContent(),/does not tell us whether the test covers/);assert.match(await page.locator('.boundary').textContent(),/not runtime effects/);
+ await page.setViewportSize({width:320,height:800});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.ok(await page.locator('#impact-map').evaluate(el=>el.scrollWidth>el.clientWidth));
+ await page.setViewportSize({width:1280,height:900});await page.getByRole('link',{name:/Open the interactive synthetic report/}).click();assert.match(await page.title(),/example\/project/);assert.equal(await page.locator('#count').textContent(),'4 files shown');}
  assert.deepEqual(errors,[]);assert.deepEqual(network,[]);
- console.log(JSON.stringify({browser:browserName,identity:true,notBlank:true,semanticLandmarks:true,labeledControls:true,keyboardSelection:true,graphKeyboardSelection:true,clearFilters:true,searchShortcut:true,search:true,roleFilter:true,ownerFilter:true,edgeFixtures:!!process.env.PATCHRIPPLE_EDGE_FIXTURES,staticDocs:!process.env.PATCHRIPPLE_DEMO_PATH,docsDemoNavigation:!process.env.PATCHRIPPLE_DEMO_PATH,noConsoleErrors:true,noNetworkAssets:true,noMobileOverflow:true,viewports:['1280x900','320x800'],url}));
+ console.log(JSON.stringify({browser:browserName,identity:true,notBlank:true,semanticLandmarks:true,labeledControls:true,keyboardSelection:true,graphKeyboardSelection:true,clearFilters:true,searchShortcut:true,search:true,roleFilter:true,ownerFilter:true,edgeFixtures:!!process.env.PATCHRIPPLE_EDGE_FIXTURES,staticDocs:!process.env.PATCHRIPPLE_DEMO_PATH,docsDemoNavigation:!process.env.PATCHRIPPLE_DEMO_PATH,guidedDemoSteps:!process.env.PATCHRIPPLE_DEMO_PATH,offlineReportHandoff:!process.env.PATCHRIPPLE_DEMO_PATH,shareablePreview:!process.env.PATCHRIPPLE_DEMO_PATH,noConsoleErrors:true,noNetworkAssets:true,noMobileOverflow:true,viewports:['1280x900','320x800'],url}));
 }finally{await browser.close();}

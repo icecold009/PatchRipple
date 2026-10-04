@@ -4,6 +4,12 @@ See what a pull request may affect. PatchRipple analyzes Git blobs inside your c
 
 **Static candidates are possibilities, not runtime effects, coverage, or proof that a change is safe.** Warnings and omissions remain visible. No target code, scripts, executable configuration, project installs, or network analyzer runs.
 
+## See the demo
+
+![A synthetic PatchRipple walkthrough: one changed file, a two-hop import chain, and a related test import.](docs/demo/preview.gif)
+
+The preview uses fictional repository data and SHAs. Its links are static import evidence; they do not establish runtime behavior or test coverage. To click through the [offline demo files](docs/demo/), download or clone this repository, then open `docs/demo/walkthrough.html` and `docs/demo/index.html` in a browser. The sample requires no installation.
+
 ## Quick start
 
 Use Node 24+, Git, a trusted PatchRipple checkout, exact commit SHAs already available in the target repository, and a new output path outside that repository. Run the read-only diagnostic first:

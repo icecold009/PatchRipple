@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="A one-minute, synthetic walkthrough of PatchRipple's offline pull request impact map.">
+<title>PatchRipple · Guided demo</title>
+<style>
+:root{color-scheme:dark;--bg:#0e1210;--panel:#171d19;--panel2:#1c241e;--line:#344139;--text:#f0f4ef;--muted:#b1beb4;--green:#a9e6bd;--amber:#f0c982;--blue:#b6cefa;--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse at 50% -30%,#22372a 0,transparent 55%),var(--bg);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}a{color:var(--green);text-underline-offset:4px}a:focus-visible,button:focus-visible{outline:3px solid var(--green);outline-offset:4px}.wrap{width:min(1120px,calc(100% - 40px));margin:auto}.top{display:flex;align-items:center;justify-content:space-between;padding:22px 0;border-bottom:1px solid var(--line)}.brand{display:flex;gap:10px;align-items:center;color:var(--text);font-size:17px;font-weight:650;text-decoration:none}.mark{width:30px;height:30px;display:grid;place-items:center;border:1px solid #5b8066;border-radius:9px;color:var(--green);background:#203328;font-size:20px}.top a.guide-link{font-size:13px}.hero{padding:62px 0 34px;max-width:800px}.eyebrow{margin:0 0 10px;color:var(--green);font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase}h1{max-width:780px;margin:0;font-size:clamp(36px,7vw,68px);font-weight:570;line-height:1.04;letter-spacing:-2.8px}.lede{max-width:690px;color:var(--muted);font-size:18px;margin:19px 0 0}.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}.chip{padding:5px 9px;border:1px solid var(--line);border-radius:99px;background:#171e19;color:#d1dbd3;font-size:12px}.chip.synthetic{border-color:#695832;color:var(--amber)}.summary{display:grid;grid-template-columns:repeat(3,1fr);margin:12px 0 30px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(130deg,#19211c,#151a17);overflow:hidden}.metric{padding:20px 24px;border-right:1px solid var(--line)}.metric:last-child{border:0}.metric strong{display:block;font-size:30px;font-weight:560;letter-spacing:-1px}.metric span{color:var(--muted);font-size:12px}.metric small{display:block;color:#d7e1d9;margin-top:5px;font-size:11px}.stage{display:grid;grid-template-columns:300px minmax(0,1fr);gap:22px;align-items:start}.steps{padding:8px 0;display:grid;gap:10px}.step{width:100%;padding:16px;text-align:left;color:var(--text);background:transparent;border:1px solid transparent;border-radius:10px}.step:hover{background:#151b17}.step[aria-current=step]{background:var(--panel2);border-color:#506956;box-shadow:inset 3px 0 var(--green)}.step-head{display:flex;align-items:center;gap:10px;font-weight:620}.step-number{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;border:1px solid #53645a;color:#d6e5db;font-size:12px}.step[aria-current=step] .step-number{color:#122017;background:var(--green);border-color:var(--green)}.step p{margin:8px 0 0 36px;color:var(--muted);font-size:12px}.step .action-hint{display:block;margin:10px 0 0 36px;color:var(--green);font-size:11px}.demo-panel{min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}.panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 19px;border-bottom:1px solid var(--line)}.panel-head strong{font-size:13px}.badge{padding:4px 8px;border:1px solid #6a5834;border-radius:5px;color:var(--amber);font-size:10px;white-space:nowrap}.map{overflow-x:auto;padding:20px 16px;background-color:#121714;background-image:radial-gradient(#303b33 1px,transparent 1px);background-size:18px 18px}.map svg{display:block;width:100%;min-width:680px;height:auto;min-height:240px}.edge{fill:none;stroke:#8eab98;stroke-width:2;transition:stroke .2s,opacity .2s}.edge.test{stroke:#9cb5e9;stroke-dasharray:5 5}.node rect{fill:#202923;stroke:#526359;stroke-width:1.4;transition:stroke .2s,fill .2s}.node.changed rect{fill:#362d20;stroke:#a17d44}.node.test rect{fill:#202936;stroke:#637da0}.node text{font-family:var(--mono);fill:var(--text);font-size:13px}.node .sub{font:11px system-ui;fill:var(--muted)}.map[data-step="1"] .edge,.map[data-step="1"] .node:not(.changed){opacity:.3}.map[data-step="2"] .edge.test,.map[data-step="2"] .node.test{opacity:.25}.map[data-step="3"] .edge:not(.test),.map[data-step="3"] .node:not(.test):not(.changed){opacity:.25}.map[data-step="2"] .edge:not(.test){stroke:var(--green);stroke-width:3}.map[data-step="3"] .edge.test{stroke:var(--blue);stroke-width:3}.map[data-step="3"] .node.test rect{stroke:var(--blue);stroke-width:3}.map-caption{margin:0;padding:0 20px 14px;color:var(--muted);font-size:11px}.explain{min-height:122px;padding:20px;border-top:1px solid var(--line)}.explain .eyebrow{margin-bottom:6px}.explain h2{font-size:18px;letter-spacing:-.4px;margin:0 0 7px}.explain p{color:#d1dbd3;margin:0;font-size:13px}.chain{display:block;margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:#111613;color:#d8e6dc;font:12px/1.7 var(--mono);overflow-wrap:anywhere}.boundary{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start;padding:15px 17px;margin:20px 0;border:1px solid #685831;border-radius:9px;background:#242117;color:#e6dcc1}.boundary .icon{font-size:17px;color:var(--amber)}.boundary p{margin:0;font-size:12px}.boundary strong{color:#ffe6b1}.next{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:19px 0 52px}.next p{margin:0;color:var(--muted);font-size:12px}.button-link{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:9px 14px;border:1px solid #649171;border-radius:7px;background:#294132;color:#d7ffe2;font-size:13px;font-weight:620;text-decoration:none}.button-link:hover{background:#34533d}.secondary{font-size:12px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}footer{padding:19px 0 28px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.no-js{padding:10px 14px;border:1px solid var(--line);border-radius:8px;color:var(--muted)}
+@media(max-width:780px){.hero{padding-top:45px}.stage{grid-template-columns:1fr;gap:10px}.steps{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.step{padding:12px 9px}.step-head{align-items:flex-start;gap:7px;font-size:12px}.step-number{flex:none;width:23px;height:23px}.step p{margin:7px 0 0;font-size:11px}.step .action-hint{margin:7px 0 0;font-size:10px}.summary{margin-bottom:18px}.metric{padding:15px 12px}.metric strong{font-size:26px}.metric span{font-size:11px}.metric small{font-size:10px}.next{align-items:flex-start;flex-direction:column}.map{padding:14px 8px}.map svg{min-height:0}}
+@media(max-width:480px){.wrap{width:min(100% - 28px,1120px)}.top{padding:16px 0}.brand{font-size:15px}.top a.guide-link{font-size:11px}.hero{padding:37px 0 25px}h1{letter-spacing:-1.8px}.lede{font-size:16px}.chips{gap:6px}.chip{font-size:10px}.metric{padding:13px 9px}.metric strong{font-size:23px}.metric span{font-size:10px}.steps{gap:4px}.step{padding:10px 7px}.step-head{display:grid;gap:5px}.step p{line-height:1.4}.panel-head{padding:13px}.explain{padding:16px}.explain h2{font-size:16px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="top" aria-label="PatchRipple links">
+    <a class="brand" href="../index.html"><span class="mark" aria-hidden="true">↳</span>PatchRipple</a>
+    <a class="guide-link" href="../index.html">Product guide &amp; setup ↗</a>
+  </nav>
+  <main>
+    <header class="hero">
+      <p class="eyebrow">A 60-second guided demo</p>
+      <h1>One changed file.<br>Where else should you look?</h1>
+      <p class="lede">PatchRipple turns static import evidence into a small map of files that may deserve a closer look during review.</p>
+      <div class="chips" aria-label="Demo details"><span class="chip synthetic">Synthetic example</span><span class="chip">No install to explore</span><span class="chip">Offline report</span></div>
+    </header>
+
+    <section class="summary" aria-label="Example summary">
+      <div class="metric"><strong>1</strong><span>changed path</span><small><code>src/core.ts</code></small></div>
+      <div class="metric"><strong>3</strong><span>static candidates</span><small>Including one related test</small></div>
+      <div class="metric"><strong>2 hops</strong><span>to a possible dependent</span><small><code>core.ts ← api.ts ← ui.ts</code></small></div>
+    </section>
+
+    <section class="stage" aria-label="Interactive walkthrough">
+      <div class="steps" role="group" aria-label="Choose a demo step">
+        <button class="step" type="button" data-step="1" aria-current="step" aria-controls="walkthrough-explanation impact-map">
+          <span class="step-head"><span class="step-number">1</span><span>Find the change</span></span>
+          <p>Start with the file this pull request changes.</p><span class="action-hint">Show changed file</span>
+        </button>
+        <button class="step" type="button" data-step="2" aria-current="false" aria-controls="walkthrough-explanation impact-map">
+          <span class="step-head"><span class="step-number">2</span><span>Follow imports</span></span>
+          <p>Trace which other files import it, directly or through another module.</p><span class="action-hint">Highlight import chain</span>
+        </button>
+        <button class="step" type="button" data-step="3" aria-current="false" aria-controls="walkthrough-explanation impact-map">
+          <span class="step-head"><span class="step-number">3</span><span>Inspect test evidence</span></span>
+          <p>See the related test and keep the limits in view.</p><span class="action-hint">Show test relationship</span>
+        </button>
+      </div>
+
+      <div class="demo-panel">
+        <div class="panel-head"><strong>Example pull request · <code>example/project</code></strong><span class="badge">Synthetic data</span></div>
+        <div class="map" id="impact-map" data-step="1">
+          <svg viewBox="0 0 860 300" role="img" aria-labelledby="map-title map-desc">
+            <title id="map-title">Static import relationships around the changed core module</title>
+            <desc id="map-desc">Arrows point from importers to the files they import. ui.ts imports api.ts, api.ts imports the changed core.ts, and core.test.ts imports core.ts.</desc>
+            <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8eab98"/></marker><marker id="arrow-test" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#9cb5e9"/></marker></defs>
+            <text x="32" y="30" fill="#b1beb4" font-family="system-ui" font-size="11">POTENTIAL DEPENDENTS</text>
+            <text x="612" y="30" fill="#b1beb4" font-family="system-ui" font-size="11">CHANGED FILE</text>
+            <path class="edge" d="M260 104 C282 104 298 104 320 104" marker-end="url(#arrow)"/><path class="edge test" d="M540 206 C575 206 580 128 620 112" marker-end="url(#arrow-test)"/><path class="edge" d="M540 104 C565 104 590 104 620 104" marker-end="url(#arrow)"/>
+            <g class="node" transform="translate(32 76)"><rect width="228" height="56" rx="8"/><text x="14" y="25">src/ui.ts</text><text class="sub" x="14" y="43">imports src/api.ts</text></g>
+            <g class="node" transform="translate(320 76)"><rect width="220" height="56" rx="8"/><text x="14" y="25">src/api.ts</text><text class="sub" x="14" y="43">imports src/core.ts</text></g>
+            <g class="node changed" transform="translate(620 76)"><rect width="220" height="56" rx="8"/><text x="14" y="25">src/core.ts</text><text class="sub" x="14" y="43">changed in this example</text></g>
+            <g class="node test" transform="translate(320 178)"><rect width="220" height="56" rx="8"/><text x="14" y="25">src/core.test.ts</text><text class="sub" x="14" y="43">imports src/core.ts</text></g>
+            <text x="32" y="270" fill="#9ba99f" font-family="system-ui" font-size="11">Arrows point from an importer to its dependency.</text>
+          </svg>
+        </div>
+        <p class="map-caption">The map is an aid for review. Open the report to select files and inspect base/head chains, owners, warnings, and source attribution.</p>
+        <div class="explain" id="walkthrough-explanation" aria-live="polite" aria-atomic="true">
+          <p class="eyebrow">Step 1 of 3</p><h2>Start from <code>src/core.ts</code></h2>
+          <p>This example changes one path. The map shows static importers that may be worth checking in the pull request.</p>
+          <span class="chain">Changed: src/core.ts</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="boundary" aria-label="Analysis limits"><span class="icon" aria-hidden="true">ⓘ</span><p><strong>What this does not prove:</strong> import links are static candidates, not runtime effects. A related test is not coverage proof. The sample repository name and commit IDs are fictional; no public source files are linked.</p></aside>
+
+    <div class="next"><p>Want to explore the actual offline report? Select a file, filter candidates, and open its revision-specific evidence.</p><a class="button-link" href="index.html">Open the interactive synthetic report&nbsp; ↗</a></div>
+  </main>
+  <footer>PatchRipple · No sign-up or setup is needed to explore this example. Generated reports analyze a repository locally; review warnings and omissions before drawing conclusions.</footer>
+</div>
+<noscript><p class="wrap no-js">The step selector needs JavaScript. The complete synthetic report remains available <a href="index.html">here</a>.</p></noscript>
+<script>
+const steps=[...document.querySelectorAll('.step')],map=document.getElementById('impact-map'),explanation=document.getElementById('walkthrough-explanation');
+const content={
+  1:['Find the changed file','Start from src/core.ts','This example changes one path. The map shows static importers that may be worth checking in the pull request.','Changed: src/core.ts'],
+  2:['Follow the import chain','A possible two-hop ripple','src/api.ts imports the changed module. src/ui.ts imports src/api.ts, so the report traces a revision-specific path to a more distant candidate.','src/core.ts ← src/api.ts ← src/ui.ts'],
+  3:['Inspect test evidence','One test imports the changed module','src/core.test.ts imports src/core.ts. That is a static relationship to inspect; it does not tell us whether the test covers the behavior changed.','Test candidate: src/core.test.ts']
+};
+function showStep(button){const step=button.dataset.step;for(const item of steps)item.setAttribute('aria-current',String(item===button?'step':'false'));map.dataset.step=step;const [,title,body,chain]=content[step];explanation.replaceChildren();const label=document.createElement('p');label.className='eyebrow';label.textContent='Step '+step+' of 3';const heading=document.createElement('h2');heading.textContent=title;const description=document.createElement('p');description.textContent=body;const evidence=document.createElement('span');evidence.className='chain';evidence.textContent=chain;explanation.append(label,heading,description,evidence);}
+for(const button of steps)button.addEventListener('click',()=>showStep(button));
+</script>
+</body>
+</html>

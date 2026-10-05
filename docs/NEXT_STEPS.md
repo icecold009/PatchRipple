@@ -1,10 +1,10 @@
 # Fork verification and maintainer-trial kit
 
-Prepared 2026-10-03; fixed revisions below belong to the earlier candidate. [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) is the current versioned status. This remains an execution kit, not evidence that a person completed a trial. Same-repository evidence for the earlier source is in [HOSTED_EVIDENCE.md](HOSTED_EVIDENCE.md). The current `codex/ui-impact-explorer` changes are local and unpublished; do not present the earlier Action pin as verification of them.
+Prepared 2026-10-05; fixed revisions below belong to the earlier candidate. [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) is the current versioned status. This remains an execution kit, not evidence that a person completed a trial. Same-repository evidence for the earlier source is in [HOSTED_EVIDENCE.md](HOSTED_EVIDENCE.md). The public `codex/ui-impact-explorer` baseline is `48dba51`; the current local candidate is `codex/audit-usability-fixes-2026-10-05`, and it has no hosted run or artifact yet. Issue [#3](https://github.com/icecold009/PatchRipple/issues/3) contains maintainer-trial invitations; no participant feedback or completed trial is recorded.
 
 ## Before using this kit for the current candidate
 
-1. Use the current candidate's exact published immutable Action commit and matching CLI bundle after it is reviewed and made available. The older fixed pin below is historical evidence only.
+1. Use the current candidate's exact published immutable Action commit and matching CLI bundle after it is reviewed and made available. This local candidate is not yet published; the older fixed pin below is historical evidence only.
 2. Run the diagnostic-first onboarding command from the current README on the real target repository. Record missing history, output-path, and Node/Git messages; do not treat fixture automation as a maintainer installation.
 3. Record expected, missed, and misleading edges against a real PR and ask the maintainer whether the chain explanation changed review focus. Do not fill trial rows with synthetic results.
 4. Keep the fork, same-repository hosted run, and human-trial evidence separate in the release matrix.
@@ -51,7 +51,7 @@ Record whether the maintainer independently installed the trusted bundle, unders
 
 ## Three public-repository adoption trials
 
-Select three authorized public repositories with actual maintainers willing to try the tool. Use real review comparisons and record participant feedback; proposed repositories alone are not trials. No invitation has been sent and no recipient has been selected.
+Select three authorized public repositories with actual maintainers willing to try the tool. Use real review comparisons and record participant feedback; proposed repositories alone are not trials. Invitations are posted in issue [#3](https://github.com/icecold009/PatchRipple/issues/3); its current thread has no maintainer reply or trial result. Do not treat invitations as participant agreement or adoption evidence.
 
 For each trial, record exact tool/base/head revisions, language/layout, expected and observed edges, missed/misleading candidates, whether ownership/test reasons were useful, and whether the map changed the maintainer's review focus. The structured blank record is [MAINTAINER_TRIAL_TEMPLATE.csv](MAINTAINER_TRIAL_TEMPLATE.csv). Ask for a concrete example and a limitation rather than a generic approval. Obtain permission before storing attributable feedback; use only task-relevant information.
 
@@ -61,7 +61,7 @@ For each trial, record exact tool/base/head revisions, language/layout, expected
 | 2 | Not selected | Unknown | Unknown | Unknown | None | Not started |
 | 3 | Not selected | Unknown | Unknown | Unknown | None | Not started |
 
-Draft invitation for a selected willing participant: "Would you try PatchRipple on one public JS/TS or Python PR you maintain? It produces an offline map of static dependents, related-test evidence and owners. It executes no target code and does not claim runtime impact or safety. Please record one useful review observation and one missing or misleading edge. The pinned trial guide is available; participation is optional." Sending requires an identified recipient and the user's instruction to contact them.
+Draft invitation for a selected willing participant: "Would you try PatchRipple on one public JS/TS or Python PR you maintain? It produces an offline map of static dependents, related-test evidence and owners. It executes no target code and does not claim runtime impact or safety. Please record one useful review observation and one missing or misleading edge. The pinned trial guide is available; participation is optional." Any further contact requires an identified recipient and the user's instruction to contact them.
 
 ## Completion gates
 

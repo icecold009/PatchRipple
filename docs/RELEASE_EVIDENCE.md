@@ -1,49 +1,52 @@
 # PatchRipple 0.1.0 release evidence
 
-**Current checklist, 2026-10-04.** This page is the single current evidence summary for the 0.1.0 release candidate. Historical audit/proposal pages below remain records of earlier states; use this page for current status. A successful local check does not establish hosted behavior, adoption, or release approval.
+**Current checklist, 2026-10-05.** This page is the current evidence summary for the 0.1.0 release candidate. Historical audit/proposal pages preserve earlier states. Local checks do not establish hosted behavior, adoption, or release approval.
 
 ## Current candidate
 
 | Field | Current state |
 | --- | --- |
 | Repository | `icecold009/PatchRipple` |
-| Feature branch and demo candidate | `codex/ui-impact-explorer` is the public feature branch; this candidate adds a README GIF preview and an offline guided walkthrough. No release tag or package publication. |
-| Package version | `0.1.0` in `package.json`; no release tag or package publication |
-| Hosted CI | [Run #14](https://github.com/icecold009/PatchRipple/actions/runs/37216580247) passed for candidate `f34b738` in 1m 27s. Verification, deterministic demo build, generated-file stability, package smoke, edge fixtures, and Chromium/Firefox/WebKit checks all passed. It produced no artifact. Earlier [run #13, attempt 2](https://github.com/icecold009/PatchRipple/actions/runs/37211805893) passed on baseline `9e7747f`. |
-| Existing hosted baseline | Same-repository Action and downloaded artifact evidence for the earlier implementation is recorded in [HOSTED_EVIDENCE.md](HOSTED_EVIDENCE.md) |
-| Pre-existing local work | `docs/IMPLEMENTATION_PLAN.md` is untracked and excluded from this change |
-| Release decision | Not approved; no merge, deployment, package publication, or outreach occurred for this update |
+| Public baseline | `codex/ui-impact-explorer` at `48dba51ad9b7c356d206703211885c524cbbffe5` |
+| Local candidate | `codex/audit-usability-fixes-2026-10-05`, based on `48dba51`; this task's changes have no hosted run or artifact yet |
+| Package version | `0.1.0`; no release tag or package publication |
+| Latest hosted baseline check | [Run #15](https://github.com/icecold009/PatchRipple/actions/runs/37217024033): the `verify` job and all reported steps succeeded, including verify, generated-file consistency, package smoke, and Chromium/Firefox/WebKit checks. It produced no artifact. The supplied audit associates it with the public baseline above; the connector's job response did not include the run head SHA. Earlier [run #14](https://github.com/icecold009/PatchRipple/actions/runs/37216580247) covered candidate `f34b738` and is historical. |
+| Pre-existing local work | Untracked `docs/IMPLEMENTATION_PLAN.md` is preserved and excluded from this task |
+| Release decision | No merge, deployment, or package publication is part of this task. Maintainer invitations are posted in [issue #3](https://github.com/icecold009/PatchRipple/issues/3); no trial or participant feedback is recorded. |
 
 ## Evidence matrix
 
-| Gap | Improvement in this candidate | Current evidence | Remaining gate |
+| Gap | Change in this candidate | Current evidence | Remaining gate |
 | --- | --- | --- | --- |
-| Empty, incomplete, and large browser cases were opt-in | `scripts/browser-fixtures.ts` creates all three offline bundles; CI always supplies `PATCHRIPPLE_EDGE_FIXTURES` | Hosted run #14 passed empty, incomplete, and 85-candidate checks in Chromium, Firefox, and WebKit; it produced no artifact | Validate the downloaded artifact in an authorized fork |
-| First-run demo lacked a guided explanation | Added a 3-step offline walkthrough and a looping GIF preview embedded in the public feature-branch README; the report remains a downloadable, offline HTML bundle | Local Chromium check covers all steps, keyboard activation, report handoff, no network assets/errors, and 320px layout; hosted run #14 checks README/GIF integrity plus Chromium/Firefox/WebKit; the GIF is 960×675, 16 frames/8 seconds, 399 KB | GitHub Pages remains disabled, so the interactive HTML still requires download and local opening |
-| Real PR accuracy and usefulness were unvalidated | The trial guide records exact revisions, expected/missed/misleading edges, reviewer usefulness, installation, and feedback | Existing same-repository evidence is a supported synthetic fixture only; no real maintainer trial is recorded | One observed maintainer installation and three real review trials with independently checked edges |
-| Fork artifact and exact release version were unverified | Existing fork runbook is retained and linked; it requires exact source/head SHAs and downloaded artifact validation | Same-repository [run #13](https://github.com/icecold009/PatchRipple/actions/runs/37211805893) passed for `9e7747f` but produced no artifact. Repository metadata reports zero forks; the earlier downloaded artifact in [HOSTED_EVIDENCE.md](HOSTED_EVIDENCE.md) predates this candidate | An authorized existing fork and its maintainer are required to verify this exact candidate and validate a downloaded artifact |
-| Impact reasons stopped at immediate relationships | Inspector computes the shortest changed-file → importer → dependent chain independently for base and head | Local Chromium checks assert separate base/head multi-step chains; all three browser engines passed in hosted run #14 | A maintainer must confirm these explanations are useful on real PRs and report misleading chains |
-| Common monorepo layouts lost edges | Static root workspace patterns (including exclusions), package exports/entries, nearest nested tsconfig, bounded relative `extends`, and common `packages/*/src` Python roots are supported | `npm run verify`: 36/36 tests passed, including workspace, package-export, nested-config, and Python-layout cases; unsupported/missing local metadata remains incomplete | Validate against real missed-edge reports before expanding semantics; no target configuration is executed |
-| Expected external imports made normal projects incomplete | Warnings now carry categories for expected external exclusions, unresolved local imports, resource limits, and other uncertainty | `npm run verify` confirms external warnings remain visible without alone making the graph incomplete; unresolved local and limit warnings still do | Confirm user interpretation during maintainer trials |
-| Candidate 81+ was list-only | Selecting any visible file redraws a focused neighborhood; changed nodes and relevant chains rank first; SVG remains capped at 80 | Chromium check selects the 85th list candidate and verifies its changed-to-dependent chain appears in the map; hosted run #14 passed Chromium, Firefox, and WebKit checks | Real graph usability feedback |
-| Installation required expert setup | README has a short diagnostic-first path; `doctor` checks Node, Git, exact refs, and outside/new output paths without writing | `npm run verify` covers valid refs, missing refs, existing output, and no-write behavior | Observe a real maintainer installation and refine messages from actual failures |
-| Scale/browser/accessibility evidence was narrow | Benchmark covers a 1,000-file deep graph, 651-file wide fan-out, and 202-file Python `src` layout; CI checks labels, focus, keyboard, and landmarks across three browser engines | `docs/BENCHMARK.json`: 1.67 s deep/1,000, 2.36 s wide/651 with 151 node omissions, 4.82 s Python/202 on the recorded Windows i3; hosted run #14 passed all three browser jobs | Broader real-repository performance and a manual screen-reader review remain open |
-| Historical release statements conflicted | This dated matrix is authoritative; older pages are identified as historical snapshots or linked evidence | This update records the exact run #14 candidate commit, browser jobs, and absence of artifacts; older contradictory summaries below have been replaced | Refresh this matrix after a new candidate or new external evidence |
+| Child TypeScript configs retained removed parent aliases | A declared child `compilerOptions.paths` map replaces inherited aliases. | Regression covers a removed parent alias and the active child mapping. | Validate against additional real repositories without expanding the static config subset silently. |
+| Conditional exports selected the import target for `require()` | Package export targets now use the edge's import form; unsupported workspace conditions produce an explicit unresolved warning rather than an invented edge. | Regressions cover import, require, type-only, and unsupported conditions. | Validate package-export edge cases against maintainer reports. |
+| Adjacent test suggestions missed extension combinations | `.tsx` and `.ts` sources consider both `.test.ts` and `.test.tsx` conventions; JS/JSX pairs receive the analogous treatment. | Regression covers `button.tsx` with `button.test.ts`; the reason remains labeled as a naming heuristic. | Real maintainers must confirm useful and missed test suggestions. |
+| Revision inspection selected only head for files present in both revisions | The inspector shows base/head presence, change status, separate exact-SHA source links, and a repository comparison link. | Chromium checks assert both source links and a modified-status badge; removed files retain base-only attribution. | Confirm reviewer usefulness on real pull requests. |
+| Searching hid the import chain around a match | Matching files remain visible with muted neighboring context. The diagram has a focused 0–4-hop control and an 18-node cap. | Browser checks verify a `ui.ts` search retains its core/API chain and context styling. | Real repositories may reveal different useful defaults. |
+| Large graphs and long inspectors dominated the report | Package-group filtering/headings, compact neighborhoods, and collapsed relationship/dependent lists reduce the initial view. | Chromium checks cover an 85-candidate graph, group filtering, selection, and a three-hop path; the diagram stays at 18 nodes or fewer. | Observe real graph navigation and larger package layouts. |
+| Revision and edge kinds lacked controls | Base/head/both and runtime/type-only filters are available; line styles, colors, and edge titles identify revision and kind. | Browser checks exercise revision and edge-kind filters. | Cross-browser hosted verification of this local candidate remains pending. |
+| Changed-file selection displayed an empty-chain message | Changed starting points summarize discovered dependents in base and head. | Browser checks verify those summaries on the demo graph. | Confirm explanation quality during real trials. |
+| Warnings hid revision and severity and were hard to find | Warning groups show severity/category, revision, and file; the summary count opens and focuses the warning list. | Chromium checks verify warning navigation and grouped warning output. | Manual screen-reader comprehension remains unverified. |
+| Mobile browsing placed the inspector before the file list | Mobile reports show file browsing first and keep the inspector collapsed until needed; selecting a file opens details, and “Back to files” restores row focus. | Chromium checks at 320px verify no page overflow, inspector disclosure, selection, and focus return. | Physical-device and manual screen-reader checks remain open. |
+| Real PR accuracy and usefulness were unvalidated | The trial guide captures expected, missed, and misleading edges plus review usefulness. Invitations are posted in issue #3. | Connector read found the open invitation thread and two invitation comments; no maintainer response or trial result was present. | One observed installation and three real review trials with independently checked edges. |
+| Fork artifact and exact candidate behavior were unverified | The existing fork runbook is retained and linked. | Run #15 had no artifact and does not cover this local task branch. Earlier same-repository artifact evidence is recorded in [HOSTED_EVIDENCE.md](HOSTED_EVIDENCE.md). | An authorized fork must run this exact candidate and validate its artifact. |
+| Public onboarding status had stale run and outreach wording | Current run, branch, and invitation status are refreshed in this checklist and [NEXT_STEPS.md](NEXT_STEPS.md). | Run #15's job succeeded; issue #3 contains invitations, with no completed trial. | Refresh after hosted checks or participant feedback changes. |
 
-## Local verification recorded 2026-10-04
+## Local verification recorded 2026-10-05
 
-- `npm.cmd run verify`: passed strict lint, typecheck, all 36 tests, and build.
-- `node scripts/check-build.mjs`: passed; all six generated dist/schema files were byte-identical after rebuild.
-- `npm.cmd run test:package`: passed isolated CLI/Action JS/Python WASM smoke without `node_modules` access.
-- Generated edge fixtures plus Chromium browser check passed, including keyboard selection, filtering, accessible names/landmarks/status/live-region markup, exact revision chains, offline requests, 320px overflow, and empty/incomplete/85-candidate cases.
-- For the guided-demo working-tree change, `npm.cmd run test:browser` passed in Chromium at 1280px and 320px, including all three walkthrough steps, the offline-report link, no network requests, and no page or console errors.
-- Desktop and mobile screenshots were visually inspected. This was not a manual screen-reader review.
+- `npm.cmd run lint` and `npm.cmd run typecheck`: passed.
+- `npm.cmd test`: 40/40 passed. The existing shallow-clone fixture required local Git/MSYS access outside the restricted sandbox.
+- `npm.cmd run build` and `npm.cmd run demo`: passed.
+- `node scripts/check-build.mjs`: six generated files remained byte-identical after rebuild.
+- `npm.cmd run test:package`: passed isolated CLI/Action JS/TS/Python WASM smoke.
+- `npm.cmd run test:browser:fixtures`: generated empty, incomplete, and 85-candidate offline reports.
+- `PATCHRIPPLE_BROWSER_CHANNEL=chrome` with `PATCHRIPPLE_EDGE_FIXTURES=.tmp/browser-edge-fixtures`, then `npm.cmd run test:browser`: passed Chromium checks at 1280px and 320px, including keyboard selection, search context, filters, warnings, exact revision links, mobile focus return, empty/incomplete/large cases, no page errors, no network assets, and no viewport overflow.
+- Firefox and WebKit were not run locally for this task. The hosted browser result above is for the earlier public baseline, not these unhosted changes. Manual screen-reader review remains open.
 
 ## Jev review coverage
 
-- Pre-change plan evidence used `jev-1.13.0` in two bounded reviews of six selected files each. Both returned advisory revise-plan gates; repository evidence and the user's explicit implementation request governed execution.
-- The post-change complete-diff request exceeded Jev's 45,000-character limit. Jev confirmed no partial diff was sent. The full changed set, including generated `dist/action.cjs` and `dist/cli.cjs`, therefore has no complete-diff review receipt.
-- Two post-change source-evidence batches selected `src/scan.ts`, `src/model.ts`, `src/analyze.ts`, `src/cli.ts`, `src/render.ts`, `tests/resolution.test.ts`, `src/viewer.ts`, `src/viewer-client.ts`, `scripts/browser-check.mjs`, `scripts/browser-fixtures.ts`, `.github/workflows/ci.yml`, and this release checklist. They resolved `jev-1.13.0`; each returned an advisory revise-plan gate and `code_review: null`. These bounded source checks do not substitute for full-diff review. Deterministic tests, build consistency, package smoke, and Chromium checks are recorded above.
+- Two pre-change plan-review calls used `jev-1.13.0`, with 18,448 input / 158 output tokens and 18,378 input / 158 output tokens. Both returned advisory `revise_plan_before_changes` gates and `code_review: null`; the task was split into ordered resolver, viewer, and documentation slices. These plan reviews do not count as code review.
+- The earlier implementation's complete-diff and bounded-review history is preserved below as historical evidence; it does not cover this task's diff.
 
 ## Candidate commands
 
@@ -52,28 +55,29 @@ npm.cmd run lint
 npm.cmd run typecheck
 npm.cmd test
 npm.cmd run build
+node scripts/check-build.mjs
 npm.cmd run test:package
 npm.cmd run test:browser:fixtures
 npm.cmd run test:browser
-npm.cmd run benchmark
 ```
 
-On Windows use `npm.cmd`. Browser checks select `PATCHRIPPLE_BROWSER=chromium`, `firefox`, or `webkit`. Hosted run #13, attempt 2, installed all three engines and passed the generated empty, incomplete, and 85-candidate fixtures in each. `docs/BENCHMARK.json` records synthetic performance only; it is not an accuracy result.
+On Windows use `npm.cmd`. Browser checks accept `PATCHRIPPLE_BROWSER=chromium`, `firefox`, or `webkit`; `PATCHRIPPLE_BROWSER_CHANNEL=chrome` uses the installed Chrome channel. Browser fixtures are included when `PATCHRIPPLE_EDGE_FIXTURES` points to their generated directory. `docs/BENCHMARK.json` records synthetic performance only; it is not an accuracy result.
 
 ## Warnings and completeness contract
 
-Expected external package imports remain listed as expected exclusions. They do not, by themselves, mark a graph incomplete. Unresolved local or known workspace imports, parser/configuration uncertainty, and resource limits remain visible and mark it incomplete. A complete graph describes only the declared static syntax; it does not imply runtime reach, test coverage, or change safety.
+Expected external package imports remain visible as expected exclusions and do not, by themselves, make a graph incomplete. Unresolved local or known workspace imports, parser/configuration uncertainty, and resource limits remain visible and mark it incomplete. A complete graph describes only the declared static syntax; it does not imply runtime reach, test coverage, or change safety.
 
-The map contains at most 80 nodes at once. The full candidate list contains up to the separate 500-node analysis ceiling and can focus the diagram on any visible candidate. Benchmark limits and omitted counts remain explicit.
+The diagram shows at most 18 nodes at once. Hop depth, revision, and edge-kind filters refine the neighborhood; the file list retains all analyzed candidates up to the 500-node analysis ceiling. Omitted counts describe encountered candidates, not undiscovered descendants.
 
-## External evidence and exact release gate
+## External evidence and release gate
 
-Hosted run #14 passed for the published feature-branch candidate `f34b738` and produced no artifact; run #13 attempt 2 records the earlier `9e7747f` baseline. The older downloaded same-repository artifact verifies its documented earlier revision only. The public feature-branch README carries the GIF preview, while GitHub Pages is disabled and the interactive HTML still requires download and local opening. The latest source is not merged to `main`, and no package release is published.
+Run #15 confirms hosted checks for the public baseline, but no artifact was produced. The local `codex/audit-usability-fixes-2026-10-05` candidate has not been pushed or checked by hosted CI. No implementation merge, deployment, or package release occurred in this task.
 
-Fork verification still requires an authorized existing fork because the available GitHub connector has no fork-creation operation. Repository metadata currently reports zero forks. Do not substitute a same-repository branch for a fork. Real usefulness requires actual maintainers and review comparisons; proposed repositories, fixtures, and automated tests do not count as trials. Manual screen-reader behavior also remains unverified. No outreach, Pages enablement, release publication, or merge to `main` is implied by this checklist.
+An authorized existing fork is still required to establish fork Action behavior and validate a downloaded artifact for this candidate. Issue #3 contains maintainer-trial invitations, but no participant response, installation, or review comparison is recorded. Manual screen-reader behavior is also unverified. Further outreach, Pages enablement, release publication, merge, and deployment are separate actions.
 
 ## Historical records
 
 - [HOSTED_EVIDENCE.md](HOSTED_EVIDENCE.md) records the earlier trusted same-repository Action run, artifact digest, and offline inspection.
-- [NEXT_STEPS.md](NEXT_STEPS.md) is the fork and maintainer-trial execution kit; its historical fixed SHAs apply only to the earlier candidate.
+- [NEXT_STEPS.md](NEXT_STEPS.md) is the fork and maintainer-trial execution kit; its fixed SHAs refer to an earlier candidate.
 - [COMPLETION_AUDIT.md](COMPLETION_AUDIT.md) and [HOSTED_VERIFICATION.md](HOSTED_VERIFICATION.md) preserve earlier audit/proposal states and are superseded for current status by this matrix.
+- Earlier Jev coverage, including the prior complete-diff size rejection and source-evidence batches, is recorded in the history above and does not cover the current task.

@@ -131,6 +131,8 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
      ruleBase=result.baseUrl??path.posix.dirname(file);
     }
     if(compiler.paths!==undefined){
+     // TypeScript replaces an inherited paths map whenever the child declares one.
+     result.rules=[];
      if(!compiler.paths||typeof compiler.paths!=='object'||Array.isArray(compiler.paths))warn('CONFIG_UNSUPPORTED',file,'paths must be an object');
      else for(const [pattern,value] of Object.entries(compiler.paths as Record<string,unknown>)){
       if(pattern.split('*').length>2||!Array.isArray(value)||!value.every(v=>typeof v==='string')){warn('CONFIG_UNSUPPORTED',file,'Unsupported paths rule: '+pattern);continue;}
@@ -143,7 +145,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   resolvingConfigs.delete(file);result.rules.sort((a,b)=>Number(a.pattern.includes('*'))-Number(b.pattern.includes('*'))||b.pattern.split('*')[0].length-a.pattern.split('*')[0].length||compare(a.pattern,b.pattern));configCache.set(file,result);return result;
  };
  const effectiveConfig=(from:string):Config=>{const file=configFileFor(from);return file?resolveConfig(file):{rules:[]};};
- const resolveManifestTarget=(dir:string,manifest:Record<string,unknown>,subpath:string):string|undefined=>{
+ const resolveManifestTarget=(dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind):string|undefined=>{
   let target:string|undefined,exportMiddle='';const exportsValue=manifest.exports;
   if(exportsValue!==undefined){
    let value:unknown=exportsValue;
@@ -159,12 +161,14 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
     }else if(!subpath)value=exportsObject;
     else value=undefined;
    }else if(subpath)value=undefined;
+   const activeConditions=kind==='require'?new Set(['require','node','default']):kind==='type-only'?new Set(['types','import','node','default']):new Set(['import','node','default']);
    const pick=(v:unknown):string|undefined=>{
     if(typeof v==='string')return v;
     if(Array.isArray(v)){for(const item of v){const found=pick(item);if(found)return found;}return;}
     if(v&&typeof v==='object'){
-     const conditions=v as Record<string,unknown>;
-     for(const condition of ['import','default','node','require','types']){const found=pick(conditions[condition]);if(found)return found;}
+     const conditionMap=v as Record<string,unknown>,entries=Object.entries(conditionMap);
+     if(kind==='type-only'&&Object.hasOwn(conditionMap,'types'))entries.unshift(['types',conditionMap.types]);
+     for(const [condition,targetValue] of entries)if(activeConditions.has(condition)){const found=pick(targetValue);if(found)return found;}
     }
    };
    target=pick(value);
@@ -176,22 +180,22 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   if(!target||!target.startsWith('./')||target.includes('\\'))return;
   const relative=path.posix.normalize(path.posix.join(dir,target.slice(2)));return safePath(relative)?relative:undefined;
  };
- const resolvePackagePath=(dir:string,manifest:Record<string,unknown>,subpath:string):string|undefined=>{
-  const target=resolveManifestTarget(dir,manifest,subpath);if(!target)return;
+ const resolvePackagePath=(dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind):string|undefined=>{
+  const target=resolveManifestTarget(dir,manifest,subpath,kind);if(!target)return;
   for(const candidate of candidates(target))if(snapshot.files.has(candidate))return candidate;
  };
  const packageNameAndSubpath=(spec:string):{name:string;subpath:string}=>{
   const parts=spec.split('/');const count=spec.startsWith('@')?2:1;return {name:parts.slice(0,count).join('/'),subpath:parts.slice(count).join('/')};
  };
- const resolveWorkspace=(from:string,spec:string):string|undefined=>{
+ const resolveWorkspace=(from:string,spec:string,kind:Kind):string|undefined=>{
   const {name,subpath}=packageNameAndSubpath(spec);if(ambiguousWorkspaces.has(name)){warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Duplicate workspace package name is ambiguous: '+name);return;}const pkg=workspaces.get(name);if(!pkg)return;
-  const result=resolvePackagePath(pkg.dir,pkg.manifest,subpath);if(!result)warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Workspace import does not resolve through the package export map: '+spec);return result;
+  const result=resolvePackagePath(pkg.dir,pkg.manifest,subpath,kind);if(!result)warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Workspace import has no unambiguous supported '+kind+' target in its package export map: '+spec);return result;
  };
- const resolveDirectoryPackage=(from:string,dir:string):string|undefined=>{
+ const resolveDirectoryPackage=(from:string,dir:string,kind:Kind):string|undefined=>{
   const manifest=packageDirs.get(dir);if(!manifest)return;
-  const result=resolvePackagePath(dir,manifest,'');if(!result)warn('CONFIG_UNSUPPORTED',from,'Package entry cannot be resolved safely from '+dir+'/package.json');return result;
+  const result=resolvePackagePath(dir,manifest,'',kind);if(!result)warn('CONFIG_UNSUPPORTED',from,'Package entry has no unambiguous supported '+kind+' target in '+dir+'/package.json');return result;
  };
- const resolveJS=(from:string,spec:string):string|undefined=>{
+ const resolveJS=(from:string,spec:string,kind:Kind):string|undefined=>{
   if(spec.includes('\\')||spec.includes('\0')){warn('UNRESOLVED_IMPORT',from,'Unsafe import path');return;}
   const config=effectiveConfig(from);const bases:string[]=[];let local=spec.startsWith('.');let alias=false;
   if(local)bases.push(path.posix.join(path.posix.dirname(from),spec));
@@ -202,9 +206,9 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
    const rule=matches[0];if(rule){local=true;alias=true;const [prefix,suffix]=rule.pattern.split('*');const middle=suffix===undefined?'':spec.slice(prefix.length,spec.length-suffix.length);for(const target of rule.values)bases.push(target.replace('*',middle));}
    if(config.baseUrl!==undefined)bases.push(path.posix.join(config.baseUrl,spec));
   }
-  for(const b of bases){if(!safePath(b)&&b!=='.')continue;if(packageDirs.has(b)){const result=resolveDirectoryPackage(from,b);if(result)return result;continue;}for(const c of candidates(b))if(snapshot.files.has(c))return c;}
+  for(const b of bases){if(!safePath(b)&&b!=='.')continue;if(packageDirs.has(b)){const result=resolveDirectoryPackage(from,b,kind);if(result)return result;continue;}for(const c of candidates(b))if(snapshot.files.has(c))return c;}
   const workspaceName=packageNameAndSubpath(spec).name,knownWorkspace=workspaces.has(workspaceName);
-  if(!local){const workspace=resolveWorkspace(from,spec);if(workspace)return workspace;if(knownWorkspace)return;}
+  if(!local){const workspace=resolveWorkspace(from,spec,kind);if(workspace)return workspace;if(knownWorkspace)return;}
   if(local||alias)warn('UNRESOLVED_IMPORT',from,'Cannot resolve local import '+spec);
   else if(!spec.startsWith('node:')&&!knownWorkspace)warn('EXPECTED_EXTERNAL_IMPORT',from,'External package is excluded from the local import graph: '+spec);
  };
@@ -236,7 +240,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   if(Date.now()>deadline){warn('TIME_LIMIT',p,'Parsing stopped at analysis deadline');break;}
   if(js.test(p)){
    const result=jsImports(source,p);for(const detail of result.warnings)warn('DYNAMIC_OR_INVALID_SYNTAX',p,detail);
-   for(const imp of result.imports){const to=resolveJS(p,imp.name);if(to)add(p,to,imp.kind);}
+   for(const imp of result.imports){const to=resolveJS(p,imp.name,imp.kind);if(to)add(p,to,imp.kind);}
   }else if(p.endsWith('.py')){
    const result=await pythonImports(source);for(const detail of result.warnings)warn('DYNAMIC_OR_INVALID_SYNTAX',p,detail);
    for(const imp of result.imports)for(const to of resolvePy(p,imp))if(to!==p)add(p,to,'python');

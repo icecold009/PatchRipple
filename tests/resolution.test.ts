@@ -32,6 +32,16 @@ test('tsconfig aliases use exact match and longest wildcard prefix, not rule ins
  const result=await scanFiles({'tsconfig.json':JSON.stringify({compilerOptions:{paths:{'*':['broad/*'],'@/*':['generic/*'],'@/specific/*':['specific/*'],'@/exact':['exact.ts']}}}),'api.ts':"import '@/specific/core'; import '@/exact';",'generic/specific/core.ts':'export const wrong=1;','specific/core.ts':'export const right=1;','generic/exact.ts':'export const wrong=1;','exact.ts':'export const right=1;'});
  assert.equal(result.warnings.length,0);assert.deepEqual(result.edges.map(e=>e.to),['file:specific/core.ts','file:exact.ts']);
 });
+test('a child tsconfig paths map replaces inherited aliases',async()=>{
+ const result=await scanFiles({
+  'tsconfig.base.json':JSON.stringify({compilerOptions:{paths:{'@parent/*':['parent/*']}}}),
+  'packages/app/tsconfig.json':JSON.stringify({extends:'../../tsconfig.base.json',compilerOptions:{paths:{'@child/*':['child/*']}}}),
+  'packages/app/src/api.ts':"import '@parent/core'; import '@child/core';",
+  'parent/core.ts':'export const stale=1;','packages/app/child/core.ts':'export const current=1;'
+ });
+ assert.deepEqual(result.edges.map(e=>e.to),['file:packages/app/child/core.ts']);
+ assert.ok(!result.edges.some(e=>e.to==='file:parent/core.ts'));
+});
 test('CLI ceiling violations and empty required values are usage errors',async()=>{
  const args=['analyze','--repo','.','--base','HEAD','--head','HEAD','--repository','https://github.com/example/project','--out','unused'];
  for(const [flag,value]of [['--max-nodes','501'],['--max-depth','21'],['--max-files','5001'],['--timeout-ms','60001']])assert.equal(await main([...args,flag,value]),2);
@@ -72,6 +82,36 @@ test('workspace exports and nested inherited TypeScript aliases resolve without 
   'packages/ui/src/index.d.ts':'export declare const component:number;'
  });
  assert.equal(result.warnings.length,0);assert.deepEqual(result.edges.map(e=>e.to),['file:shared/core.ts','file:packages/ui/src/index.ts']);
+});
+test('workspace conditional exports follow import, require, and type-only forms',async()=>{
+ const result=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/*']}),
+  'packages/lib/package.json':JSON.stringify({name:'lib',exports:{'.':{import:'./src/esm.js',require:'./src/cjs.js',types:'./src/index.d.ts'}}}),
+  'packages/lib/src/esm.ts':'export const flavor="esm";',
+  'packages/lib/src/cjs.ts':'export const flavor="cjs";',
+  'packages/lib/src/index.d.ts':'export declare const flavor:string;',
+  'api.ts':"import 'lib'; require('lib'); import type {Flavor} from 'lib'; export type {Flavor};"
+ });
+ assert.deepEqual(result.edges.map(e=>[e.kind,e.to]),[
+  ['static','file:packages/lib/src/esm.ts'],
+  ['require','file:packages/lib/src/cjs.ts'],
+  ['type-only','file:packages/lib/src/index.d.ts']
+ ]);
+ assert.equal(result.warnings.length,0);
+});
+test('unsupported workspace export conditions remain unresolved instead of inventing a target',async()=>{
+ const result=await scanFiles({'package.json':'{"workspaces":["packages/*"]}','packages/lib/package.json':'{"name":"lib","exports":{".":{"browser":"./src/browser.js"}}}','packages/lib/src/browser.ts':'export const browser=true;','api.ts':"require('lib');"});
+ assert.equal(result.edges.length,0);
+ assert.ok(result.warnings.some(w=>w.code==='UNRESOLVED_WORKSPACE_IMPORT'&&w.detail.includes('unambiguous supported require target')));
+});
+test('adjacent test suggestions include common cross-extension TSX tests',async()=>{
+ const f=fixture({'src/button.tsx':'export const button=1;','src/button.test.ts':''});
+ try{
+  const base=git(f.repo,'rev-parse','HEAD');f.write({'src/button.tsx':'export const button=2;'});const head=f.commit('change TSX component');
+  const graph=await analyze({repo:f.repo,base,head,repository:'https://github.com/example/project'}),testNode=graph.nodes.find(n=>n.path==='src/button.test.ts');
+  assert.ok(testNode?.roles.includes('test'));
+  assert.ok(testNode?.testReasons.some(reason=>reason.includes('Naming convention for src/button.tsx')));
+ }finally{rmSync(f.dir,{recursive:true,force:true});}
 });
 test('workspace import with a missing export target is incomplete instead of treated as external',async()=>{
  const result=await scanFiles({'package.json':'{"workspaces":["packages/*"]}','packages/ui/package.json':'{"name":"@demo/ui","exports":{".":"./src/index.js"}}','api.ts':"import '@demo/ui';",'src/changed.ts':'export const x=1;'});

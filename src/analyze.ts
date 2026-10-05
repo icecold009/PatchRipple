@@ -46,7 +46,8 @@ export async function analyze(options:Options):Promise<Graph>{
   for(const p of snapshots[revision].files.keys())if(testFile(p)){
    for(const t of targets){
     const ext=path.posix.extname(t),stem=path.posix.basename(t,ext);const dir=path.posix.dirname(t);const parent=path.posix.dirname(dir);
-    const candidatePaths=[dir+'/'+stem+'.test'+ext,dir+'/'+stem+'.spec'+ext,dir+'/__tests__/'+stem+'.test'+ext,parent+'/tests/'+stem+'.test'+ext,dir+'/test_'+stem+'.py',parent+'/tests/test_'+stem+'.py',dir+'/'+stem+'_test.py'].map(p=>path.posix.normalize(p));
+    const testExtensions=['.ts','.tsx'].includes(ext)?['.ts','.tsx']:['.js','.jsx'].includes(ext)?['.js','.jsx']:[ext];
+    const candidatePaths=[...testExtensions.flatMap(testExt=>[dir+'/'+stem+'.test'+testExt,dir+'/'+stem+'.spec'+testExt,dir+'/__tests__/'+stem+'.test'+testExt,parent+'/tests/'+stem+'.test'+testExt]),dir+'/test_'+stem+'.py',parent+'/tests/test_'+stem+'.py',dir+'/'+stem+'_test.py'].map(p=>path.posix.normalize(p));
     if(candidatePaths.includes(p))relate(p,'Naming convention for '+t+' ('+revision+')');
    }
   }

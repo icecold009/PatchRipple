@@ -6,6 +6,12 @@ import {Snapshot} from './git.js';
 import {Edge,Warning,Revision,Kind,nodeId,safePath,compare} from './model.js';
 declare const __ASSET_DIR__:string;
 const js=/\.[cm]?[jt]sx?$/;
+const MAX_WORKSPACE_PATTERNS=256;
+const MAX_WORKSPACE_PATTERN_LENGTH=512;
+const MAX_WORKSPACE_PATH_LENGTH=4096;
+const MAX_WORKSPACE_GLOB_WORK=2_000_000;
+const MAX_EXPORTS_CONDITION_DEPTH=64;
+const MAX_EXPORTS_CONDITION_NODES=4096;
 export interface Scan {edges:Edge[];warnings:Warning[]}
 interface Import {name:string;kind:Kind;members?:string[]}
 export function jsImports(source:string,file:string):{imports:Import[];warnings:string[]} {
@@ -79,21 +85,66 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
  const workspaceFieldValid=Array.isArray(rootManifest.workspaces)||!!workspaceObject&&Array.isArray(workspaceObject.packages);
  const workspacesRaw=Array.isArray(rootManifest.workspaces)?rootManifest.workspaces:workspaceFieldValid?(workspaceObject!.packages as string[]):[];
  if(rootManifest.workspaces!==undefined&&!workspaceFieldValid)warn('CONFIG_UNSUPPORTED','package.json','Workspace declarations must be a string array or an object with a packages array');
+ type WorkspacePattern={exclude:boolean;tokens:({kind:'literal';value:string}|{kind:'one'}|{kind:'star';crossesSlash:boolean})[]};
+ const workspacePatterns:WorkspacePattern[]=[];
+ const workspacePatternLimitExceeded=workspacesRaw.length>MAX_WORKSPACE_PATTERNS;
+ if(workspacePatternLimitExceeded)warn('CONFIG_UNSUPPORTED','package.json','Workspace pattern count exceeds 256; workspace resolution was skipped');
+ if(!workspacePatternLimitExceeded)for(const raw of workspacesRaw){
+  if(typeof raw!=='string'){warn('CONFIG_UNSUPPORTED','package.json','Unsupported workspace pattern: '+String(raw));continue;}
+  const exclude=raw.startsWith('!'),pattern=raw.replace(/^!/,'').replace(/^\.\//,'').replace(/\/$/,'');
+  if(pattern.includes('{')||pattern.includes('[')||pattern.includes(']')||pattern.length>MAX_WORKSPACE_PATTERN_LENGTH||!safePath(pattern.replaceAll('*','x').replaceAll('?','x'))){
+   warn('CONFIG_UNSUPPORTED','package.json','Unsupported or oversized workspace pattern: '+raw);continue;
+  }
+  const chars=Array.from(pattern),tokens:WorkspacePattern['tokens']=[];
+  for(let i=0;i<chars.length;i++){
+   if(chars[i]==='*'){const crossesSlash=chars[i+1]==='*';tokens.push({kind:'star',crossesSlash});if(crossesSlash)i++;}
+   else if(chars[i]==='?')tokens.push({kind:'one'});
+   else tokens.push({kind:'literal',value:chars[i]});
+  }
+  workspacePatterns.push({exclude,tokens});
+ }
+ const includePatterns=workspacePatterns.filter(pattern=>!pattern.exclude),excludePatterns=workspacePatterns.filter(pattern=>pattern.exclude);
  const workspaces=new Map<string,{dir:string;manifest:Record<string,unknown>}>();
  const ambiguousWorkspaces=new Set<string>();
- for(const pattern of workspacesRaw)if(typeof pattern!=='string'||pattern.includes('{')||pattern.includes('[')||pattern.includes(']')||pattern==='!')warn('CONFIG_UNSUPPORTED','package.json','Unsupported workspace pattern: '+String(pattern));
- const globMatches=(pattern:string,value:string):boolean=>{
-  const normalized=pattern.replace(/^!/, '').replace(/^\.\//,'').replace(/\/$/,'');
-  if(!safePath(normalized.replaceAll('*','x').replaceAll('?','x')))return false;
-  if(normalized.includes('[')||normalized.includes(']'))return false;
-  const escaped=normalized.replace(/[.+^${}()|\\]/g,'\\$&').replaceAll('**','\u0000').replaceAll('*','[^/]*').replaceAll('?','[^/]');
-  return new RegExp('^'+escaped.replaceAll('\u0000','.*')+'$').test(value);
+ let workspaceGlobWork=0,workspaceGlobLimitExceeded=false;
+ const globMatches=(pattern:WorkspacePattern,value:string):boolean|undefined=>{
+  if(value.length>MAX_WORKSPACE_PATH_LENGTH){workspaceGlobLimitExceeded=true;return;}
+  const close=(states:Set<number>):Set<number>|undefined=>{
+   const closed=new Set(states),pending=[...states];
+   while(pending.length){
+    if(++workspaceGlobWork>MAX_WORKSPACE_GLOB_WORK){workspaceGlobLimitExceeded=true;return;}
+    const state=pending.pop()!,token=pattern.tokens[state];
+    if(token?.kind==='star'&&!closed.has(state+1)){closed.add(state+1);pending.push(state+1);}
+   }
+   return closed;
+  };
+  let states=close(new Set([0]));if(!states)return;
+  for(const character of value){
+   const next=new Set<number>();
+   for(const state of states){
+    if(++workspaceGlobWork>MAX_WORKSPACE_GLOB_WORK){workspaceGlobLimitExceeded=true;return;}
+    const token=pattern.tokens[state];if(!token)continue;
+    if(token.kind==='star'){if(token.crossesSlash||character!=='/')next.add(state);}
+    else if(token.kind==='one'){if(character!=='/')next.add(state+1);}
+    else if(token.value===character)next.add(state+1);
+   }
+   if(next.size===0)return false;
+   states=close(next);if(!states)return;
+  }
+  return states.has(pattern.tokens.length);
+ };
+ const matchesAny=(patterns:WorkspacePattern[],value:string):boolean=>{
+  for(const pattern of patterns){const matched=globMatches(pattern,value);if(matched===undefined)return false;if(matched)return true;}
+  return false;
  };
  for(const [dir,manifest] of packageDirs){
+  if(workspaceGlobLimitExceeded)break;
   if(!dir||typeof manifest.name!=='string')continue;
-  const patterns=workspacesRaw.filter((pattern):pattern is string=>typeof pattern==='string'),included=patterns.some(pattern=>!pattern.startsWith('!')&&globMatches(pattern,dir)),excluded=patterns.some(pattern=>pattern.startsWith('!')&&globMatches(pattern,dir));
+  const included=matchesAny(includePatterns,dir),excluded=matchesAny(excludePatterns,dir);
+  if(workspaceGlobLimitExceeded)break;
   if(included&&!excluded){if(workspaces.has(manifest.name)&&workspaces.get(manifest.name)!.dir!==dir){ambiguousWorkspaces.add(manifest.name);workspaces.delete(manifest.name);warn('CONFIG_UNSUPPORTED','package.json','Duplicate workspace package name is ambiguous: '+manifest.name);}else if(!ambiguousWorkspaces.has(manifest.name))workspaces.set(manifest.name,{dir,manifest});}
  }
+ if(workspaceGlobLimitExceeded){workspaces.clear();ambiguousWorkspaces.clear();warn('CONFIG_UNSUPPORTED','package.json','Workspace glob matching exceeded its safety budget; workspace resolution was skipped');}
  const configCache=new Map<string,Config>();
  const resolvingConfigs=new Set<string>();
  const configFileFor=(from:string):string|undefined=>{
@@ -162,13 +213,20 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
     else value=undefined;
    }else if(subpath)value=undefined;
    const activeConditions=kind==='require'?new Set(['require','node','default']):kind==='type-only'?new Set(['types','import','node','default']):new Set(['import','node','default']);
-   const pick=(v:unknown):string|undefined=>{
-    if(typeof v==='string')return v;
-    if(Array.isArray(v)){for(const item of v){const found=pick(item);if(found)return found;}return;}
-    if(v&&typeof v==='object'){
-     const conditionMap=v as Record<string,unknown>,entries=Object.entries(conditionMap);
-     if(kind==='type-only'&&Object.hasOwn(conditionMap,'types'))entries.unshift(['types',conditionMap.types]);
-     for(const [condition,targetValue] of entries)if(activeConditions.has(condition)){const found=pick(targetValue);if(found)return found;}
+   const pick=(root:unknown):string|undefined=>{
+    const pending:{value:unknown;depth:number}[]=[{value:root,depth:0}];let visited=0;
+    while(pending.length){
+     const {value:current,depth}=pending.pop()!;
+     if(++visited>MAX_EXPORTS_CONDITION_NODES){warn('CONFIG_UNSUPPORTED',dir?dir+'/package.json':'package.json','Package exports condition map exceeds its safety budget');return;}
+     if(depth>MAX_EXPORTS_CONDITION_DEPTH){warn('CONFIG_UNSUPPORTED',dir?dir+'/package.json':'package.json','Package exports condition nesting exceeds 64 levels');return;}
+     if(typeof current==='string')return current;
+     if(Array.isArray(current)){
+      for(let i=current.length-1;i>=0;i--)pending.push({value:current[i],depth:depth+1});
+     }else if(current&&typeof current==='object'){
+      const conditionMap=current as Record<string,unknown>,entries=Object.entries(conditionMap);
+      for(let i=entries.length-1;i>=0;i--){const [condition,targetValue]=entries[i];if(activeConditions.has(condition))pending.push({value:targetValue,depth:depth+1});}
+      if(kind==='type-only'&&Object.hasOwn(conditionMap,'types'))pending.push({value:conditionMap.types,depth:depth+1});
+     }
     }
    };
    target=pick(value);

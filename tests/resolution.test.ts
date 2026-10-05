@@ -99,6 +99,37 @@ test('workspace conditional exports follow import, require, and type-only forms'
  ]);
  assert.equal(result.warnings.length,0);
 });
+test('workspace glob matching stops at a deterministic work budget',async()=>{
+ const directory='a/'.repeat(119)+'pkg',pattern='**/'.repeat(120)+'wanted';
+ const files:Record<string,string>={'package.json':JSON.stringify({workspaces:Array.from({length:256},()=>pattern)}),'api.ts':"import '@demo/deep';"};
+ files[directory+'/package.json']=JSON.stringify({name:'@demo/deep'});
+ const result=await scanFiles(files);
+ assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.detail.includes('safety budget')));
+ assert.equal(result.edges.length,0);
+});
+test('workspace glob matcher preserves recursive directory patterns',async()=>{
+ const result=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/**']}),
+  'packages/group/lib/package.json':JSON.stringify({name:'@demo/lib',exports:{'.':'./src/index.js'}}),
+  'packages/group/lib/src/index.ts':'export const value=1;',
+  'api.ts':"import '@demo/lib';"
+ });
+ assert.ok(result.edges.some(e=>e.to==='file:packages/group/lib/src/index.ts'));
+ assert.equal(result.warnings.length,0);
+});
+test('deep workspace export conditions are bounded and reported',async()=>{
+ let target:unknown='./src/index.js';
+ for(let depth=0;depth<128;depth++)target={default:target};
+ const result=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/*']}),
+  'packages/lib/package.json':JSON.stringify({name:'lib',exports:{'.':target}}),
+  'packages/lib/src/index.ts':'export const value=1;',
+  'api.ts':"import 'lib';"
+ });
+ assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.detail.includes('nesting exceeds 64 levels')));
+ assert.ok(result.warnings.some(w=>w.code==='UNRESOLVED_WORKSPACE_IMPORT'));
+ assert.equal(result.edges.length,0);
+});
 test('unsupported workspace export conditions remain unresolved instead of inventing a target',async()=>{
  const result=await scanFiles({'package.json':'{"workspaces":["packages/*"]}','packages/lib/package.json':'{"name":"lib","exports":{".":{"browser":"./src/browser.js"}}}','packages/lib/src/browser.ts':'export const browser=true;','api.ts':"require('lib');"});
  assert.equal(result.edges.length,0);

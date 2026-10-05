@@ -220205,6 +220205,12 @@ var import_web_tree_sitter = __toESM(require_tree_sitter(), 1);
 var import_node_path = __toESM(require("node:path"), 1);
 var import_node_url = require("node:url");
 var js = /\.[cm]?[jt]sx?$/;
+var MAX_WORKSPACE_PATTERNS = 256;
+var MAX_WORKSPACE_PATTERN_LENGTH = 512;
+var MAX_WORKSPACE_PATH_LENGTH = 4096;
+var MAX_WORKSPACE_GLOB_WORK = 2e6;
+var MAX_EXPORTS_CONDITION_DEPTH = 64;
+var MAX_EXPORTS_CONDITION_NODES = 4096;
 function jsImports(source, file) {
   const sf = import_typescript.default.createSourceFile(file, source, import_typescript.default.ScriptTarget.Latest, true);
   const imports = [], warnings = [];
@@ -220326,19 +220332,90 @@ async function scan(snapshot, revision2, roots, deadline) {
   const workspaceFieldValid = Array.isArray(rootManifest.workspaces) || !!workspaceObject && Array.isArray(workspaceObject.packages);
   const workspacesRaw = Array.isArray(rootManifest.workspaces) ? rootManifest.workspaces : workspaceFieldValid ? workspaceObject.packages : [];
   if (rootManifest.workspaces !== void 0 && !workspaceFieldValid) warn("CONFIG_UNSUPPORTED", "package.json", "Workspace declarations must be a string array or an object with a packages array");
+  const workspacePatterns = [];
+  const workspacePatternLimitExceeded = workspacesRaw.length > MAX_WORKSPACE_PATTERNS;
+  if (workspacePatternLimitExceeded) warn("CONFIG_UNSUPPORTED", "package.json", "Workspace pattern count exceeds 256; workspace resolution was skipped");
+  if (!workspacePatternLimitExceeded) for (const raw of workspacesRaw) {
+    if (typeof raw !== "string") {
+      warn("CONFIG_UNSUPPORTED", "package.json", "Unsupported workspace pattern: " + String(raw));
+      continue;
+    }
+    const exclude = raw.startsWith("!"), pattern = raw.replace(/^!/, "").replace(/^\.\//, "").replace(/\/$/, "");
+    if (pattern.includes("{") || pattern.includes("[") || pattern.includes("]") || pattern.length > MAX_WORKSPACE_PATTERN_LENGTH || !safePath(pattern.replaceAll("*", "x").replaceAll("?", "x"))) {
+      warn("CONFIG_UNSUPPORTED", "package.json", "Unsupported or oversized workspace pattern: " + raw);
+      continue;
+    }
+    const chars = Array.from(pattern), tokens = [];
+    for (let i = 0; i < chars.length; i++) {
+      if (chars[i] === "*") {
+        const crossesSlash = chars[i + 1] === "*";
+        tokens.push({ kind: "star", crossesSlash });
+        if (crossesSlash) i++;
+      } else if (chars[i] === "?") tokens.push({ kind: "one" });
+      else tokens.push({ kind: "literal", value: chars[i] });
+    }
+    workspacePatterns.push({ exclude, tokens });
+  }
+  const includePatterns = workspacePatterns.filter((pattern) => !pattern.exclude), excludePatterns = workspacePatterns.filter((pattern) => pattern.exclude);
   const workspaces = /* @__PURE__ */ new Map();
   const ambiguousWorkspaces = /* @__PURE__ */ new Set();
-  for (const pattern of workspacesRaw) if (typeof pattern !== "string" || pattern.includes("{") || pattern.includes("[") || pattern.includes("]") || pattern === "!") warn("CONFIG_UNSUPPORTED", "package.json", "Unsupported workspace pattern: " + String(pattern));
+  let workspaceGlobWork = 0, workspaceGlobLimitExceeded = false;
   const globMatches = (pattern, value) => {
-    const normalized = pattern.replace(/^!/, "").replace(/^\.\//, "").replace(/\/$/, "");
-    if (!safePath(normalized.replaceAll("*", "x").replaceAll("?", "x"))) return false;
-    if (normalized.includes("[") || normalized.includes("]")) return false;
-    const escaped = normalized.replace(/[.+^${}()|\\]/g, "\\$&").replaceAll("**", "\0").replaceAll("*", "[^/]*").replaceAll("?", "[^/]");
-    return new RegExp("^" + escaped.replaceAll("\0", ".*") + "$").test(value);
+    if (value.length > MAX_WORKSPACE_PATH_LENGTH) {
+      workspaceGlobLimitExceeded = true;
+      return;
+    }
+    const close = (states2) => {
+      const closed = new Set(states2), pending = [...states2];
+      while (pending.length) {
+        if (++workspaceGlobWork > MAX_WORKSPACE_GLOB_WORK) {
+          workspaceGlobLimitExceeded = true;
+          return;
+        }
+        const state = pending.pop(), token = pattern.tokens[state];
+        if (token?.kind === "star" && !closed.has(state + 1)) {
+          closed.add(state + 1);
+          pending.push(state + 1);
+        }
+      }
+      return closed;
+    };
+    let states = close(/* @__PURE__ */ new Set([0]));
+    if (!states) return;
+    for (const character of value) {
+      const next = /* @__PURE__ */ new Set();
+      for (const state of states) {
+        if (++workspaceGlobWork > MAX_WORKSPACE_GLOB_WORK) {
+          workspaceGlobLimitExceeded = true;
+          return;
+        }
+        const token = pattern.tokens[state];
+        if (!token) continue;
+        if (token.kind === "star") {
+          if (token.crossesSlash || character !== "/") next.add(state);
+        } else if (token.kind === "one") {
+          if (character !== "/") next.add(state + 1);
+        } else if (token.value === character) next.add(state + 1);
+      }
+      if (next.size === 0) return false;
+      states = close(next);
+      if (!states) return;
+    }
+    return states.has(pattern.tokens.length);
+  };
+  const matchesAny = (patterns, value) => {
+    for (const pattern of patterns) {
+      const matched = globMatches(pattern, value);
+      if (matched === void 0) return false;
+      if (matched) return true;
+    }
+    return false;
   };
   for (const [dir, manifest] of packageDirs) {
+    if (workspaceGlobLimitExceeded) break;
     if (!dir || typeof manifest.name !== "string") continue;
-    const patterns = workspacesRaw.filter((pattern) => typeof pattern === "string"), included = patterns.some((pattern) => !pattern.startsWith("!") && globMatches(pattern, dir)), excluded = patterns.some((pattern) => pattern.startsWith("!") && globMatches(pattern, dir));
+    const included = matchesAny(includePatterns, dir), excluded = matchesAny(excludePatterns, dir);
+    if (workspaceGlobLimitExceeded) break;
     if (included && !excluded) {
       if (workspaces.has(manifest.name) && workspaces.get(manifest.name).dir !== dir) {
         ambiguousWorkspaces.add(manifest.name);
@@ -220346,6 +220423,11 @@ async function scan(snapshot, revision2, roots, deadline) {
         warn("CONFIG_UNSUPPORTED", "package.json", "Duplicate workspace package name is ambiguous: " + manifest.name);
       } else if (!ambiguousWorkspaces.has(manifest.name)) workspaces.set(manifest.name, { dir, manifest });
     }
+  }
+  if (workspaceGlobLimitExceeded) {
+    workspaces.clear();
+    ambiguousWorkspaces.clear();
+    warn("CONFIG_UNSUPPORTED", "package.json", "Workspace glob matching exceeded its safety budget; workspace resolution was skipped");
   }
   const configCache = /* @__PURE__ */ new Map();
   const resolvingConfigs = /* @__PURE__ */ new Set();
@@ -220452,21 +220534,29 @@ async function scan(snapshot, revision2, roots, deadline) {
         else value = void 0;
       } else if (subpath) value = void 0;
       const activeConditions = kind === "require" ? /* @__PURE__ */ new Set(["require", "node", "default"]) : kind === "type-only" ? /* @__PURE__ */ new Set(["types", "import", "node", "default"]) : /* @__PURE__ */ new Set(["import", "node", "default"]);
-      const pick = (v) => {
-        if (typeof v === "string") return v;
-        if (Array.isArray(v)) {
-          for (const item of v) {
-            const found = pick(item);
-            if (found) return found;
+      const pick = (root) => {
+        const pending = [{ value: root, depth: 0 }];
+        let visited = 0;
+        while (pending.length) {
+          const { value: current, depth } = pending.pop();
+          if (++visited > MAX_EXPORTS_CONDITION_NODES) {
+            warn("CONFIG_UNSUPPORTED", dir ? dir + "/package.json" : "package.json", "Package exports condition map exceeds its safety budget");
+            return;
           }
-          return;
-        }
-        if (v && typeof v === "object") {
-          const conditionMap = v, entries = Object.entries(conditionMap);
-          if (kind === "type-only" && Object.hasOwn(conditionMap, "types")) entries.unshift(["types", conditionMap.types]);
-          for (const [condition, targetValue] of entries) if (activeConditions.has(condition)) {
-            const found = pick(targetValue);
-            if (found) return found;
+          if (depth > MAX_EXPORTS_CONDITION_DEPTH) {
+            warn("CONFIG_UNSUPPORTED", dir ? dir + "/package.json" : "package.json", "Package exports condition nesting exceeds 64 levels");
+            return;
+          }
+          if (typeof current === "string") return current;
+          if (Array.isArray(current)) {
+            for (let i = current.length - 1; i >= 0; i--) pending.push({ value: current[i], depth: depth + 1 });
+          } else if (current && typeof current === "object") {
+            const conditionMap = current, entries = Object.entries(conditionMap);
+            for (let i = entries.length - 1; i >= 0; i--) {
+              const [condition, targetValue] = entries[i];
+              if (activeConditions.has(condition)) pending.push({ value: targetValue, depth: depth + 1 });
+            }
+            if (kind === "type-only" && Object.hasOwn(conditionMap, "types")) pending.push({ value: conditionMap.types, depth: depth + 1 });
           }
         }
       };

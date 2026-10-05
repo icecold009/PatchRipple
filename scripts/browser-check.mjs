@@ -16,7 +16,7 @@ try{
  assert.equal(await page.locator('#map-svg[role="group"][aria-label]').count(),1);assert.equal(await page.locator('#count[role="status"]').count(),1);assert.equal(await page.locator('#graph-note').getAttribute('aria-live'),'polite');assert.equal(await page.locator('[id]').evaluateAll(nodes=>new Set(nodes.map(n=>n.id)).size),await page.locator('[id]').count());
  assert.equal(await page.locator('#count').textContent(),'4 files shown');
  assert.ok(await page.locator('.warnings').isVisible());assert.match(await page.locator('.warnings').textContent(),/SYNTHETIC_DEMO/);
- await page.getByRole('button',{name:/Analysis warnings/}).click();assert.ok(await page.locator('.warning').first().evaluate(el=>el===document.activeElement));
+ await page.locator('.warning-group').first().evaluate(group=>{group.open=false;});await page.getByRole('button',{name:/Analysis warnings/}).click();assert.ok(await page.locator('.warning').first().evaluate(el=>el.closest('details.warning-group')?.open));assert.ok(await page.locator('.warning').first().evaluate(el=>el===document.activeElement));
  if(process.env.PATCHRIPPLE_VISUAL_DIR){await mkdir(process.env.PATCHRIPPLE_VISUAL_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.PATCHRIPPLE_VISUAL_DIR,'desktop.png'),fullPage:true});}
  await page.getByLabel('Find a file').fill('core.test');assert.equal(await page.locator('#count').textContent(),'1 file shown');
  const button=page.getByRole('button',{name:'src/core.test.ts',exact:true});await button.focus();await page.keyboard.press('Enter');

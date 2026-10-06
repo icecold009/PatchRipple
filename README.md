@@ -1,78 +1,126 @@
 # PatchRipple
 
-See what a pull request may affect. PatchRipple analyzes Git blobs inside your chosen environment and produces an offline map of changed files, static import dependents, related tests and base-revision CODEOWNERS.
+**Static impact maps for pull requests.**
 
-**Static candidates are possibilities, not runtime effects, coverage, or proof that a change is safe.** Warnings and omissions remain visible. No target code, scripts, executable configuration, project installs, or network analyzer runs.
+PatchRipple reads exact Git revisions and maps changed files to potential import dependents, related-test evidence, and base-revision CODEOWNERS. It creates a self-contained report you can inspect offline.
 
-## See the demo
+![PatchRipple demo showing changed files, a dependency map, and related-test evidence.](docs/demo/preview.gif)
 
-![A synthetic PatchRipple walkthrough: one changed file, a two-hop import chain, and a related test import.](docs/demo/preview.gif)
+> Static candidates are possibilities—not runtime effects, test coverage, or proof that a change is safe. Review the evidence and warnings alongside the diff.
 
-The preview uses fictional repository data and SHAs. Its links are static import evidence; they do not establish runtime behavior or test coverage. To click through the [offline demo files](docs/demo/), download or clone this repository, then open `docs/demo/walkthrough.html` and `docs/demo/index.html` in a browser. The sample requires no installation.
+[Open the demo walkthrough](docs/demo/walkthrough.html) · [See the security model](docs/SECURITY.md) · [Review the graph schema](docs/graph-schema-v1.md)
+
+## What it does
+
+- Compares a pull request from the merge base of its base and head revisions, or compares two exact revisions directly.
+- Finds static JavaScript, TypeScript, and Python import relationships in both revisions.
+- Adds related-test hints and uses CODEOWNERS from the base revision.
+- Produces an offline HTML report, JSON graph, SVG map, and metadata file.
+- Shows uncertainty, warnings, and analysis limits instead of presenting guesses as proof.
+
+The CLI and Action read repository data and create the report in the environment where you run them. They do not execute code, configuration, or hooks from the repository being analyzed, and they do not install its dependencies.
+
+## Try the demo
+
+The animated preview above and the [clickable walkthrough](docs/demo/walkthrough.html) use fictional repository data and commit SHAs. Open the walkthrough or [offline report](docs/demo/index.html) in a browser; neither requires installation.
 
 ## Quick start
 
-Use Node 24+, Git, a trusted PatchRipple checkout, exact commit SHAs already available in the target repository, and a new output path outside that repository. Run the read-only diagnostic first:
+Use Node.js 24 or newer, Git, a trusted PatchRipple checkout, and exact base and head commits available in the target repository. The bundled CLI is `dist/cli.cjs`; no PatchRipple dependency installation is needed inside the target repository.
 
-```sh
-node /path/to/PatchRipple/dist/cli.cjs doctor \
-  --repo /path/to/target --base BASE_COMMIT --head HEAD_COMMIT \
-  --out /path/to/new-offline-bundle
-```
+First check that the revisions and output path are usable:
 
-Then replace `doctor` with `analyze` and add `--repository https://github.com/OWNER/REPO` to produce the four-file offline report. If the doctor says a commit is unavailable, fetch the required history yourself; PatchRipple will not run repository scripts or change the target checkout. The doctor does not create output files.
+~~~sh
+node /path/to/PatchRipple/dist/cli.cjs doctor --repo /path/to/target --base BASE_SHA --head HEAD_SHA --out /path/to/new-report
+~~~
 
-## Local development
+Then generate the report in that same new path:
 
-Node 24 and Git are required. In this trusted PatchRipple checkout:
+~~~sh
+node /path/to/PatchRipple/dist/cli.cjs analyze --repo /path/to/target --base BASE_SHA --head HEAD_SHA --repository https://github.com/OWNER/REPOSITORY --out /path/to/new-report
+~~~
 
-```sh
-npm ci --ignore-scripts
-npm run verify
-node dist/cli.cjs --help
-```
+`doctor` is read-only and creates no files, so its output path can be reused by `analyze`. The output directory must be new and outside the target repository; existing paths are refused. PatchRipple does not fetch missing Git history. If a revision is unavailable, fetch it yourself and rerun the diagnostic.
 
-This installs PatchRipple's development dependencies only, never dependencies from an analyzed repository. The build produces trusted self-contained CLI/Action code, Python WASM assets and schema. No npm install is needed inside the repository being analyzed.
+PR mode is the default: it compares `merge-base(base, head)` to `head`. Use `--mode direct` to compare exactly the two supplied revisions.
 
-## Analyze a comparison
+## Read the report
 
-```sh
-node /path/to/PatchRipple/dist/cli.cjs analyze \
-  --repo /path/to/target \
-  --base BASE_COMMIT --head HEAD_COMMIT \
-  --repository https://github.com/owner/repo \
-  --out /path/to/new-bundle
-```
+The output bundle contains:
 
-The output must be a **new directory outside the analyzed repository**. Existing paths are refused. PR mode computes merge-base(base tip, head) to head; explicit `--mode direct` compares exactly two commits. Missing objects/history fail with guidance; fetch them before analysis. The target working tree stays untouched.
+| File | Contents |
+| --- | --- |
+| `index.html` | Interactive, self-contained offline report |
+| `graph.json` | Validated graph data |
+| `graph.svg` | Static map |
+| `metadata.json` | Tool version, generation time, and analysis limits |
 
-Outputs: `index.html`, `graph.json`, `graph.svg`, `metadata.json`. Open index.html locally; it has no external assets or fetch requests. Generated time is separate from deterministically sorted graph semantics.
+The HTML report loads no external assets or data. Its source and comparison links open GitHub only when you choose them. The diagram shows a focused neighborhood; the full candidate list and analysis warnings remain available in the report.
 
-Exit codes: 0 valid output (possibly visibly incomplete), 1 fatal Git/IO/schema failure, 2 invalid command arguments. Never interpret exit 0 alone as complete analysis or safe change.
+An exit code of `0` means a valid report was produced, possibly with visible uncertainty. It does not mean the analysis is complete or the change is safe.
+
+## Supported analysis and limits
+
+| Area | Evidence PatchRipple can report |
+| --- | --- |
+| JavaScript and TypeScript | Literal imports and re-exports, type-only imports, literal dynamic imports, and `require`; relative paths, supported nested TypeScript path aliases, and declared workspace package entries |
+| Python | Static `import` and `from` relationships, relative imports, package initializers, and configured source roots |
+| Tests | Likely related test files based on import relationships and adjacent or naming conventions; these are heuristics, not test-coverage results |
+| CODEOWNERS | Matches from base-revision precedence (.github/CODEOWNERS, root CODEOWNERS, then docs/CODEOWNERS); the last matching supported rule wins |
+
+Dynamic import expressions, wildcard or unresolved Python imports, unresolved local paths, unsupported configuration or syntax, parser uncertainty, symlinks, submodules, and resource limits can produce warnings or omissions. Expected external package imports remain visible as exclusions; by themselves, they do not make the graph incomplete.
+
+Supported CODEOWNERS patterns include directory patterns, `*`, `**`, and `?`, with user, team, or email owners. Unsupported patterns warn; team membership is not looked up.
+
+A “complete” graph means complete within PatchRipple’s documented static syntax. It does not establish runtime reachability, test coverage, or safety. See the [graph schema](docs/graph-schema-v1.md) for warning categories and completeness semantics.
+
+Per-revision input limits:
+
+| Limit | Maximum |
+| --- | ---: |
+| Files | 5,000 |
+| Aggregate source size | 40 MiB |
+| Source file size | 512 KiB |
+
+Graph and analysis limits:
+
+| Limit | Maximum |
+| --- | ---: |
+| Candidate nodes | 500 |
+| Candidate edges | 2,000 |
+| Reverse traversal depth | 20 |
+| Git and parsing time | 60 seconds |
+
+CLI and Action options can lower the file-count, candidate-node, traversal-depth, and analysis-time ceilings; supplied values cannot raise a built-in maximum. The report diagram displays up to 18 nodes at a time; filters and hop controls help inspect larger candidate sets.
 
 ## GitHub Action
 
-Use [the consumer workflow template](docs/consumer-workflow.yml.example). Replace PATCHRIPPLE_COMMIT with a reviewed published immutable Action commit before installing. It uses Node 24; self-hosted runners must support Node24 Actions and the pinned checkout runtime. The analyzer ships in dist; do not rebuild/install it from the target PR.
+The repository includes an Action manifest and a [consumer workflow template](docs/consumer-workflow.yml.example). The template uses `pull_request` with read-only `contents` permission and verifies that the exact base and head Git objects are available.
 
-The workflow uses pull_request and read-only contents permission. It fetches the base repository's PR head ref, verifies exact base/head objects, and never executes target scripts. Do not use pull_request_target, write tokens, secrets, merge-SHA substitution, PR comments, or deployment in the analysis workflow.
+Before using the template, replace `PATCHRIPPLE_COMMIT` with the full commit SHA you have reviewed. Keep the exact-revision checks and read-only permissions. Do not use `pull_request_target` or expose secrets to analysis of pull-request data.
 
-Workflow artifacts require GitHub sign-in and repository read access to download and have configured retention. For an anonymous permanent map, the owner publishes the static bundle separately. Output reveals repository paths and owners; review data before public publication.
+The generated bundle can include repository paths, owners, and dependency relationships. Review it before uploading or sharing it. See the [security notes](docs/SECURITY.md) for the full trust boundary.
 
-## Supported scope and uncertainty
+## Develop PatchRipple
 
-- JS/JSX/TS/TSX/MJS/CJS/MTS/CTS: literal imports, re-exports, type imports, dynamic literal imports and require. Dynamic expressions and parse errors warn.
-- Relative extension/index resolution; nearest nested tsconfig JSON with bounded in-repository relative `extends`, `baseUrl`, and `paths`; and declared npm workspaces with static package `exports`, `main`, `module`, `types`, or `typings` entries. No config code or package install is run. Conditional exports resolve only the documented static condition subset; unsupported or missing local targets remain visible warnings.
-- Expected external package imports remain visible as exclusions without making an otherwise complete local graph incomplete. Unresolved local/workspace imports, unsupported configuration, parser uncertainty, and resource limits are separately classified and make the graph incomplete.
-- Python: static import/from, relative levels, existing package initializers, explicit source roots (default root and src), and common `packages/*/src` roots discovered through package initializers. Dynamic/wildcard imports, namespace ambiguity, unsupported syntax and unresolved relative imports warn. Set `--python-roots .,src` explicitly for other layouts.
-- Both base/head graphs contribute impact. Removed files and old rename paths keep base attribution and links.
-- Tests use importing test files and documented adjacent/naming conventions; testReasons describe heuristic evidence.
-- Base CODEOWNERS precedence .github, root, docs; last matching supported rule. Supported subset: directory patterns, *, **, ?, @user/@team and email owners; negative patterns, character classes, escapes and malformed rules warn. No team membership lookup.
-- Symlinks/submodules, binaries, unsupported source languages and limits warn. Expected external exclusions remain visible without alone marking a graph incomplete; other uncertainty and omissions do.
+Use Node.js 24 or newer and Git in a trusted PatchRipple checkout:
 
-Default hard ceilings per revision: 5,000 files, 40 MiB aggregate source, 512 KiB/file; displayed candidates 500 nodes/2,000 edges/depth 20; analysis Git/parsing deadline 60 seconds. CLI limits can reduce these ceilings, never raise them. The diagram shows at most 18 nodes at a time, with 0–4 hop controls, revision and runtime/type-only filters, and package-group filtering. Searching or filtering files keeps nearby graph context visible in a muted style; the full candidate list remains available. Inspector relationship lists expand on demand, warnings link to grouped details, and source links are labeled by exact revision. Omitted counts describe encountered candidates, not undiscovered descendants.
+~~~sh
+npm ci --ignore-scripts
+npm run verify
+npm run demo
+npm run test:package
+~~~
 
-## Verification and release
+`npm run verify` runs linting, type checking, tests, and the build. Browser checks are also available:
 
-`npm test` exercises real temporary Git histories, parser fixtures, deletion/rename attribution, bounds, output collisions, malformed data, escaping and deterministic output. `npm run test:browser:fixtures` generates empty, incomplete, and 85-candidate offline reports consumed by the browser check and CI. `npm run demo` builds a synthetic offline example. The [release evidence](docs/RELEASE_EVIDENCE.md) is the current dated checklist; actual fork runs, maintainer trials, and screen-reader review remain distinct external evidence.
+~~~sh
+npm run test:browser:fixtures
+npm run test:browser
+~~~
 
-MIT licensed. Third-party assets retain their own licenses in dist/THIRD_PARTY_NOTICES.txt. No registry publication, deployment, automatic writes, hosted analysis service or unconditional free-tier promise.
+Browser tests require the supported Playwright browser to be installed. These commands build and test PatchRipple itself; they do not install or execute dependencies from a target repository.
+
+## License
+
+PatchRipple is MIT licensed. Third-party component notices and license details are included in [`dist/THIRD_PARTY_NOTICES.txt`](dist/THIRD_PARTY_NOTICES.txt).

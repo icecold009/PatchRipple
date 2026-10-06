@@ -2791,11 +2791,11 @@ var require_validate = __commonJS({
         jsonPointer = $data;
         data = names_1.default.rootData;
       } else {
-        const matches = RELATIVE_JSON_POINTER.exec($data);
-        if (!matches)
+        const matches2 = RELATIVE_JSON_POINTER.exec($data);
+        if (!matches2)
           throw new Error(`Invalid JSON-pointer: ${$data}`);
-        const up = +matches[1];
-        jsonPointer = matches[2];
+        const up = +matches2[1];
+        jsonPointer = matches2[2];
         if (jsonPointer === "#") {
           if (up >= dataLevel)
             throw new Error(errorMsg("property/index", up));
@@ -3682,11 +3682,11 @@ var require_schemes = __commonJS({
         urnComponent.error = "URN can not be parsed";
         return urnComponent;
       }
-      const matches = urnComponent.path.match(URN_REG);
-      if (matches && matches[0] === urnComponent.path) {
+      const matches2 = urnComponent.path.match(URN_REG);
+      if (matches2 && matches2[0] === urnComponent.path) {
         const scheme = options.scheme || urnComponent.scheme || "urn";
-        urnComponent.nid = matches[1].toLowerCase();
-        urnComponent.nss = matches[2];
+        urnComponent.nid = matches2[1].toLowerCase();
+        urnComponent.nss = matches2[2];
         const urnScheme = `${scheme}:${options.nid || urnComponent.nid}`;
         const schemeHandler = getSchemeHandler(urnScheme);
         urnComponent.path = void 0;
@@ -4000,8 +4000,8 @@ var require_fast_uri = __commonJS({
     var URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
     var AUTHORITY_PREFIX = /^(?:[^#/:?]+:)?\/\/([^/?#]*)/;
     var AUTHORITY_INTRODUCER_REGION = /^(?:[^#/:?]+:)?([/\\\t\n\r]*)/;
-    function getParseError(parsed, matches) {
-      if (matches[2] !== void 0 && parsed.path && parsed.path[0] !== "/") {
+    function getParseError(parsed, matches2) {
+      if (matches2[2] !== void 0 && parsed.path && parsed.path[0] !== "/") {
         return 'URI path must start with "/" when authority is present.';
       }
       if (typeof parsed.port === "number" && (parsed.port < 0 || parsed.port > 65535)) {
@@ -4023,9 +4023,9 @@ var require_fast_uri = __commonJS({
     function isIPLiteral(host) {
       return host[0] === "[" && host[host.length - 1] === "]";
     }
-    function hasMalformedComponentPercentEncoding(matches) {
-      const host = matches[4];
-      return hasMalformedPercentEncoding(matches[3]) || host !== void 0 && !isIPLiteral(host) && hasMalformedPercentEncoding(host) || hasMalformedPercentEncoding(matches[6]) || hasMalformedPercentEncoding(matches[7]) || hasMalformedPercentEncoding(matches[8]);
+    function hasMalformedComponentPercentEncoding(matches2) {
+      const host = matches2[4];
+      return hasMalformedPercentEncoding(matches2[3]) || host !== void 0 && !isIPLiteral(host) && hasMalformedPercentEncoding(host) || hasMalformedPercentEncoding(matches2[6]) || hasMalformedPercentEncoding(matches2[7]) || hasMalformedPercentEncoding(matches2[8]);
     }
     function canonicalizeHost(parsed, options, schemeHandler, isIP) {
       if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport) && parsed.host && !isIPLiteral(parsed.host) && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host)) {
@@ -4082,15 +4082,15 @@ var require_fast_uri = __commonJS({
           }
         }
       }
-      const matches = uri.match(URI_PARSE);
-      if (matches) {
-        parsed.scheme = matches[1];
-        parsed.userinfo = matches[3];
-        parsed.host = matches[4];
-        parsed.port = parseInt(matches[5], 10);
-        parsed.path = matches[6] || "";
-        parsed.query = matches[7];
-        parsed.fragment = matches[8];
+      const matches2 = uri.match(URI_PARSE);
+      if (matches2) {
+        parsed.scheme = matches2[1];
+        parsed.userinfo = matches2[3];
+        parsed.host = matches2[4];
+        parsed.port = parseInt(matches2[5], 10);
+        parsed.path = matches2[6] || "";
+        parsed.query = matches2[7];
+        parsed.fragment = matches2[8];
         if (parsed.scheme !== void 0) {
           const decodedScheme = unescape(parsed.scheme);
           if (VALID_SCHEME.test(decodedScheme)) {
@@ -4100,14 +4100,14 @@ var require_fast_uri = __commonJS({
             malformedScheme = true;
           }
         }
-        malformedPercentEncoding = hasMalformedComponentPercentEncoding(matches);
+        malformedPercentEncoding = hasMalformedComponentPercentEncoding(matches2);
         if (malformedPercentEncoding) {
           parsed.error = parsed.error || "URI contains malformed percent-encoding.";
         }
         if (isNaN(parsed.port)) {
-          parsed.port = matches[5];
+          parsed.port = matches2[5];
         }
-        const parseError = getParseError(parsed, matches);
+        const parseError = getParseError(parsed, matches2);
         if (parseError !== void 0) {
           parsed.error = parsed.error || parseError;
           malformedAuthorityOrPort = true;
@@ -85208,7 +85208,7 @@ ${lanes.join("\n")}
           const targetEndText = targetTexts[lastTargetIndex];
           if (lastSourceIndex === 0 && sourceStartText.length < targetStartText.length + targetEndText.length || !sourceStartText.startsWith(targetStartText) || !sourceEndText.endsWith(targetEndText)) return void 0;
           const remainingEndText = sourceEndText.slice(0, sourceEndText.length - targetEndText.length);
-          const matches = [];
+          const matches2 = [];
           let seg = 0;
           let pos = targetStartText.length;
           for (let i = 1; i < lastTargetIndex; i++) {
@@ -85234,7 +85234,7 @@ ${lanes.join("\n")}
             }
           }
           addMatch(lastSourceIndex, getSourceText(lastSourceIndex).length);
-          return matches;
+          return matches2;
           function getSourceText(index) {
             return index < lastSourceIndex ? sourceTexts[index] : remainingEndText;
           }
@@ -85243,7 +85243,7 @@ ${lanes.join("\n")}
               [sourceTexts[seg].slice(pos), ...sourceTexts.slice(seg + 1, s), getSourceText(s).slice(0, p)],
               sourceTypes.slice(seg, s)
             );
-            matches.push(matchType);
+            matches2.push(matchType);
             seg = s;
             pos = p;
           }
@@ -85489,12 +85489,12 @@ ${lanes.join("\n")}
             visited.set(key, inferencePriority);
             inferencePriority = Math.min(inferencePriority, saveInferencePriority);
           }
-          function inferFromMatchingTypes(sources, targets, matches) {
+          function inferFromMatchingTypes(sources, targets, matches2) {
             let matchedSources;
             let matchedTargets;
             for (const t of targets) {
               for (const s of sources) {
-                if (matches(s, t)) {
+                if (matches2(s, t)) {
                   inferFromTypes(s, t);
                   matchedSources = appendIfUnique(matchedSources, s);
                   matchedTargets = appendIfUnique(matchedTargets, t);
@@ -85670,11 +85670,11 @@ ${lanes.join("\n")}
             }
           }
           function inferToTemplateLiteralType(source, target) {
-            const matches = inferTypesFromTemplateLiteralType(source, target);
+            const matches2 = inferTypesFromTemplateLiteralType(source, target);
             const types = target.types;
-            if (matches || every(target.texts, (s) => s.length === 0)) {
+            if (matches2 || every(target.texts, (s) => s.length === 0)) {
               for (let i = 0; i < types.length; i++) {
-                const source2 = matches ? matches[i] : neverType;
+                const source2 = matches2 ? matches2[i] : neverType;
                 const target2 = types[i];
                 if (source2.flags & 1024 && target2.flags & 34078720) {
                   const inferenceContext = getInferenceInfoForType(target2);
@@ -156027,23 +156027,23 @@ ${lanes.join("\n")}
           return 4;
         }
         if (supportScopedPackage) {
-          const matches = /^@([^/]+)\/([^/]+)$/.exec(packageName);
-          if (matches) {
+          const matches2 = /^@([^/]+)\/([^/]+)$/.exec(packageName);
+          if (matches2) {
             const scopeResult = validatePackageNameWorker(
-              matches[1],
+              matches2[1],
               /*supportScopedPackage*/
               false
             );
             if (scopeResult !== 0) {
-              return { name: matches[1], isScopeName: true, result: scopeResult };
+              return { name: matches2[1], isScopeName: true, result: scopeResult };
             }
             const packageResult = validatePackageNameWorker(
-              matches[2],
+              matches2[2],
               /*supportScopedPackage*/
               false
             );
             if (packageResult !== 0) {
-              return { name: matches[2], isScopeName: false, result: packageResult };
+              return { name: matches2[2], isScopeName: false, result: packageResult };
             }
             return 0;
           }
@@ -159355,12 +159355,12 @@ ${lanes.join("\n")}
             const result = exportInfo.get(key2);
             return result == null ? void 0 : result.map(rehydrateCachedInfo);
           },
-          search: (importingFile, preferCapitalized, matches, action) => {
+          search: (importingFile, preferCapitalized, matches2, action) => {
             if (importingFile !== usableByFileName) return;
             return forEachEntry(exportInfo, (info2, key2) => {
               const { symbolName: symbolName2, ambientModuleName } = parseKey(key2);
               const name = preferCapitalized && info2[0].capitalizedSymbolName || symbolName2;
-              if (matches(name, info2[0].targetFlags)) {
+              if (matches2(name, info2[0].targetFlags)) {
                 const rehydrated = info2.map(rehydrateCachedInfo);
                 const filtered = rehydrated.filter((r, i) => isNotShadowedByDeeperNodeModulesPackage(r, info2[i].packageName));
                 if (filtered.length) {
@@ -189916,23 +189916,23 @@ ${newComment.split("\n").map((c) => ` * ${c}`).join("\n")}
         ].filter(isString);
         const includeGlobs = normalizedSuffix ? matchingSuffixes.map((suffix) => "**/*" + suffix) : ["./*"];
         const isExportsOrImportsWildcard = (isExports || isImports) && endsWith(pattern, "/*");
-        let matches = getMatchesWithPrefix(baseDirectory);
+        let matches2 = getMatchesWithPrefix(baseDirectory);
         if (possibleInputBaseDirectoryForOutDir) {
-          matches = concatenate(matches, getMatchesWithPrefix(possibleInputBaseDirectoryForOutDir));
+          matches2 = concatenate(matches2, getMatchesWithPrefix(possibleInputBaseDirectoryForOutDir));
         }
         if (possibleInputBaseDirectoryForDeclarationDir) {
-          matches = concatenate(matches, getMatchesWithPrefix(possibleInputBaseDirectoryForDeclarationDir));
+          matches2 = concatenate(matches2, getMatchesWithPrefix(possibleInputBaseDirectoryForDeclarationDir));
         }
         if (!normalizedSuffix) {
-          matches = concatenate(matches, getDirectoryMatches(baseDirectory));
+          matches2 = concatenate(matches2, getDirectoryMatches(baseDirectory));
           if (possibleInputBaseDirectoryForOutDir) {
-            matches = concatenate(matches, getDirectoryMatches(possibleInputBaseDirectoryForOutDir));
+            matches2 = concatenate(matches2, getDirectoryMatches(possibleInputBaseDirectoryForOutDir));
           }
           if (possibleInputBaseDirectoryForDeclarationDir) {
-            matches = concatenate(matches, getDirectoryMatches(possibleInputBaseDirectoryForDeclarationDir));
+            matches2 = concatenate(matches2, getDirectoryMatches(possibleInputBaseDirectoryForDeclarationDir));
           }
         }
-        return matches;
+        return matches2;
         function getMatchesWithPrefix(directory) {
           const completePrefix = fragmentHasPath ? directory : ensureTrailingDirectorySeparator(directory) + normalizedPrefixBase;
           return mapDefined(tryReadDirectory(
@@ -215720,8 +215720,8 @@ Project '${project.projectName}' (${ProjectKind[project.projectKind]}) ${counter
             return searchForDeclaration(nameToSearch, fileToSearch, noDtsProgram);
           }
           function searchForDeclaration(declarationName, fileToSearch, noDtsProgram) {
-            const matches = ts_FindAllReferences_exports.Core.getTopMostDeclarationNamesInFile(declarationName, fileToSearch);
-            return mapDefined(matches, (match) => {
+            const matches2 = ts_FindAllReferences_exports.Core.getTopMostDeclarationNamesInFile(declarationName, fileToSearch);
+            return mapDefined(matches2, (match) => {
               const symbol = noDtsProgram.getTypeChecker().getSymbolAtLocation(match);
               const decl = getDeclarationFromName(match);
               if (symbol && decl) {
@@ -220211,12 +220211,27 @@ var MAX_WORKSPACE_PATH_LENGTH = 4096;
 var MAX_WORKSPACE_GLOB_WORK = 2e6;
 var MAX_EXPORTS_CONDITION_DEPTH = 64;
 var MAX_EXPORTS_CONDITION_NODES = 4096;
+var MAX_JS_AST_NODES = 1e5;
 function jsImports(source, file) {
-  const sf = import_typescript.default.createSourceFile(file, source, import_typescript.default.ScriptTarget.Latest, true);
   const imports = [], warnings = [];
+  let sf;
+  try {
+    sf = import_typescript.default.createSourceFile(file, source, import_typescript.default.ScriptTarget.Latest, true);
+  } catch (error) {
+    if (error instanceof RangeError) return { imports, warnings: ["JavaScript parser resource limit reached; import graph may be incomplete"] };
+    throw error;
+  }
   const diagnostics = sf.parseDiagnostics;
   if (diagnostics?.length) warnings.push("Parse errors; import graph may be incomplete");
-  function visit(n) {
+  const pending = [sf];
+  let visited = 0;
+  while (pending.length) {
+    if (visited >= MAX_JS_AST_NODES) {
+      warnings.push("AST node limit reached; import graph may be incomplete");
+      break;
+    }
+    visited++;
+    const n = pending.pop();
     if (import_typescript.default.isImportDeclaration(n) || import_typescript.default.isExportDeclaration(n)) {
       if (n.moduleSpecifier && import_typescript.default.isStringLiteral(n.moduleSpecifier)) {
         const typeOnly = import_typescript.default.isImportDeclaration(n) ? !!n.importClause?.isTypeOnly || !n.importClause?.name && !!n.importClause?.namedBindings && import_typescript.default.isNamedImports(n.importClause.namedBindings) && n.importClause.namedBindings.elements.length > 0 && n.importClause.namedBindings.elements.every((e) => e.isTypeOnly) : !!n.isTypeOnly || !!n.exportClause && import_typescript.default.isNamedExports(n.exportClause) && n.exportClause.elements.length > 0 && n.exportClause.elements.every((e) => e.isTypeOnly);
@@ -220230,9 +220245,12 @@ function jsImports(source, file) {
       if (arg && (import_typescript.default.isStringLiteral(arg) || import_typescript.default.isNoSubstitutionTemplateLiteral(arg))) imports.push({ name: arg.text, kind: n.expression.kind === import_typescript.default.SyntaxKind.ImportKeyword ? "dynamic-literal" : "require" });
       else warnings.push("Dynamic import/require expression cannot be resolved");
     }
-    import_typescript.default.forEachChild(n, visit);
+    const children = [];
+    import_typescript.default.forEachChild(n, (child) => {
+      children.push(child);
+    });
+    for (let i = children.length - 1; i >= 0; i--) pending.push(children[i]);
   }
-  visit(sf);
   return { imports, warnings };
 }
 var language;
@@ -220616,13 +220634,13 @@ async function scan(snapshot, revision2, roots, deadline) {
     let alias = false;
     if (local) bases.push(import_node_path.default.posix.join(import_node_path.default.posix.dirname(from), spec));
     else {
-      const matches = [];
+      const matches2 = [];
       for (const rule2 of config.rules) {
         const [prefix, suffix] = rule2.pattern.split("*");
         const match = suffix === void 0 ? spec === rule2.pattern : spec.startsWith(prefix) && spec.endsWith(suffix) && spec.length >= prefix.length + suffix.length;
-        if (match) matches.push(rule2);
+        if (match) matches2.push(rule2);
       }
-      const rule = matches[0];
+      const rule = matches2[0];
       if (rule) {
         local = true;
         alias = true;
@@ -220725,42 +220743,109 @@ async function scan(snapshot, revision2, roots, deadline) {
 }
 
 // src/owners.ts
+var MAX_OWNER_PATTERN_LENGTH = 512;
+var MAX_OWNER_RULES = 2048;
+var MAX_OWNER_PATH_LENGTH = 4096;
+var MAX_OWNER_MATCH_WORK = 2e7;
+function tokenize(pattern) {
+  const tokens = [];
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === "*" && pattern[i + 1] === "*") {
+      i++;
+      if (pattern[i + 1] === "/") {
+        i++;
+        tokens.push({ kind: "globstar-dir" });
+      } else tokens.push({ kind: "globstar" });
+    } else if (c === "*") tokens.push({ kind: "star" });
+    else if (c === "?") tokens.push({ kind: "one" });
+    else tokens.push({ kind: "literal", value: c });
+  }
+  return tokens;
+}
+function matches(rule, path5) {
+  const length = path5.length;
+  let current = new Uint8Array(length + 1), next = new Uint8Array(length + 1);
+  current[0] = 1;
+  if (!rule.rooted) {
+    for (let i = 1; i <= length; i++) if (path5[i - 1] === "/") current[i] = 1;
+  }
+  for (const token of rule.tokens) {
+    next.fill(0);
+    if (token.kind === "literal") {
+      for (let i = 0; i < length; i++) if (current[i] && path5[i] === token.value) next[i + 1] = 1;
+    } else if (token.kind === "one") {
+      for (let i = 0; i < length; i++) if (current[i] && path5[i] !== "/") next[i + 1] = 1;
+    } else if (token.kind === "star") {
+      for (let i = 0; i <= length; i++) if (current[i] || i > 0 && path5[i - 1] !== "/" && next[i - 1]) next[i] = 1;
+    } else if (token.kind === "globstar") {
+      for (let i = 0; i <= length; i++) if (current[i] || i > 0 && next[i - 1]) next[i] = 1;
+    } else {
+      let canConsume = false;
+      for (let i = 0; i <= length; i++) {
+        if (current[i] || i > 0 && canConsume && path5[i - 1] === "/") next[i] = 1;
+        if (current[i]) canConsume = true;
+      }
+    }
+    [current, next] = [next, current];
+  }
+  for (let i = 0; i <= length; i++) if (current[i] && (i === length || rule.allowDescendants && path5[i] === "/")) return true;
+  return false;
+}
 function compileOwners(files) {
   const selected = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"].find((p) => files.has(p));
   const warnings = [], rules = [];
   if (!selected) return { match: () => [], warnings };
+  const warn = (detail) => warnings.push({ code: "CODEOWNERS_UNSUPPORTED", path: selected, revision: "base", detail });
+  let warnedLongPattern = false, warnedRuleLimit = false, remainingWork = MAX_OWNER_MATCH_WORK, warnedWorkLimit = false;
   for (const line of files.get(selected).split(/\r?\n/)) {
     const trimmed = line.replace(/\s+#.*$/, "").trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const parts = trimmed.split(/\s+/);
     const raw = parts.shift();
     if (/[!\[\]\\]/.test(raw) || raw.includes("***") || parts.some((x) => !/^@[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)?$|^[^@\s]+@[^@\s]+$/.test(x))) {
-      warnings.push({ code: "CODEOWNERS_UNSUPPORTED", path: selected, revision: "base", detail: "Unsupported CODEOWNERS pattern/owner line" });
+      warn("Unsupported CODEOWNERS pattern/owner line");
       continue;
+    }
+    if (raw.length > MAX_OWNER_PATTERN_LENGTH) {
+      if (!warnedLongPattern) {
+        warn("Pattern length limit reached; overlong rules were ignored");
+        warnedLongPattern = true;
+      }
+      continue;
+    }
+    if (rules.length >= MAX_OWNER_RULES) {
+      if (!warnedRuleLimit) warn("Rule count limit reached; remaining rules were ignored");
+      warnedRuleLimit = true;
+      break;
     }
     let pattern = raw.replace(/^\//, "");
     const directory = pattern.endsWith("/");
     pattern = pattern.replace(/\/$/, "");
-    const rooted = raw.startsWith("/") || pattern.includes("/");
-    const wildcardTail = /[*?]/.test(pattern.split("/").at(-1));
-    let expression = "";
-    for (let i = 0; i < pattern.length; i++) {
-      const c = pattern[i];
-      if (c === "*" && pattern[i + 1] === "*") {
-        i++;
-        if (pattern[i + 1] === "/") {
-          i++;
-          expression += "(?:.*/)?";
-        } else expression += ".*";
-      } else if (c === "*") expression += "[^/]*";
-      else if (c === "?") expression += "[^/]";
-      else expression += c.replace(/[.*+?^$\{\}()|[\]\\]/g, "\\$&");
-    }
-    rules.push({ pattern: new RegExp((rooted ? "^" : "(?:^|/)") + expression + (directory || !wildcardTail ? "(?:/.*)?$" : "$")), owners: [...new Set(parts)].sort(compare) });
+    const rooted = raw.startsWith("/") || pattern.includes("/"), wildcardTail = /[*?]/.test(pattern.split("/").at(-1));
+    rules.push({ tokens: tokenize(pattern), rooted, allowDescendants: directory || !wildcardTail, owners: [...new Set(parts)].sort(compare) });
   }
   return { match: (p) => {
     let result = [];
-    for (const rule of rules) if (rule.pattern.test(p)) result = rule.owners;
+    if (p.length > MAX_OWNER_PATH_LENGTH) {
+      if (!warnedWorkLimit) {
+        warn("Path length limit reached; remaining ownership matches were skipped");
+        warnedWorkLimit = true;
+      }
+      return result;
+    }
+    for (const rule of rules) {
+      const cost = rule.tokens.length * (p.length + 1);
+      if (cost > remainingWork) {
+        if (!warnedWorkLimit) {
+          warn("Matching stopped at the deterministic work limit; ownership may be incomplete");
+          warnedWorkLimit = true;
+        }
+        break;
+      }
+      remainingWork -= cost;
+      if (matches(rule, p)) result = rule.owners;
+    }
     return result;
   }, warnings };
 }
@@ -220781,6 +220866,7 @@ async function analyze(options) {
   const scans = { base: await scan(snapshots.base, "base", roots, reader.deadline), head: await scan(snapshots.head, "head", roots, reader.deadline) };
   const ownerSnapshot = change.baseTipSha === change.analysisBaseSha ? snapshots.base : reader.snapshot(change.baseTipSha, "base", [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]);
   const ownership = compileOwners(ownerSnapshot.files);
+  const ownerWarningsAtStart = ownership.warnings.length;
   const warnings = [...scans.base.warnings, ...scans.head.warnings, ...ownership.warnings, ...ownerSnapshot === snapshots.base ? [] : ownerSnapshot.warnings];
   for (const c of changes) if (/(?:^|\/)(?:tsconfig[^/]*\.json|package\.json|pyproject\.toml|setup\.cfg)$/.test(c.newPath ?? c.oldPath ?? "")) warnings.push({ code: "CONFIG_CHANGE", path: c.newPath ?? c.oldPath, detail: "Configuration change may affect relationships beyond statically discovered imports" });
   const included = /* @__PURE__ */ new Map();
@@ -220860,6 +220946,7 @@ async function analyze(options) {
     owners: ownership.match(p),
     testReasons: [...testReasons.get(p) ?? []].sort(compare)
   })).sort((a, b) => compare(a.path, b.path));
+  warnings.push(...ownership.warnings.slice(ownerWarningsAtStart));
   const edgeCandidates = [...scans.base.edges, ...scans.head.edges].filter((e) => included.has(e.from.slice(5)) && included.has(e.to.slice(5))).sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b)));
   const edges = edgeCandidates.slice(0, limits.maxEdges);
   const omittedEdges = edgeCandidates.length - edges.length;

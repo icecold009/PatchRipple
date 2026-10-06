@@ -12,13 +12,18 @@ const MAX_WORKSPACE_PATH_LENGTH=4096;
 const MAX_WORKSPACE_GLOB_WORK=2_000_000;
 const MAX_EXPORTS_CONDITION_DEPTH=64;
 const MAX_EXPORTS_CONDITION_NODES=4096;
+const MAX_JS_AST_NODES=100_000;
 export interface Scan {edges:Edge[];warnings:Warning[]}
 interface Import {name:string;kind:Kind;members?:string[]}
 export function jsImports(source:string,file:string):{imports:Import[];warnings:string[]} {
- const sf=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true);const imports:Import[]=[],warnings:string[]=[];
+ const imports:Import[]=[],warnings:string[]=[];let sf:ts.SourceFile;
+ try{sf=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true);}catch(error){if(error instanceof RangeError)return {imports,warnings:['JavaScript parser resource limit reached; import graph may be incomplete']};throw error;}
  const diagnostics=(sf as ts.SourceFile & {parseDiagnostics?:readonly ts.Diagnostic[]}).parseDiagnostics;
  if(diagnostics?.length)warnings.push('Parse errors; import graph may be incomplete');
- function visit(n:ts.Node){
+ const pending:ts.Node[]=[sf];let visited=0;
+ while(pending.length){
+  if(visited>=MAX_JS_AST_NODES){warnings.push('AST node limit reached; import graph may be incomplete');break;}
+  visited++;const n=pending.pop()!;
   if(ts.isImportDeclaration(n)||ts.isExportDeclaration(n)){
    if(n.moduleSpecifier&&ts.isStringLiteral(n.moduleSpecifier)){
     const typeOnly=ts.isImportDeclaration(n)?!!n.importClause?.isTypeOnly||(!n.importClause?.name&&!!n.importClause?.namedBindings&&ts.isNamedImports(n.importClause.namedBindings)&&n.importClause.namedBindings.elements.length>0&&n.importClause.namedBindings.elements.every(e=>e.isTypeOnly)):!!n.isTypeOnly||(!!n.exportClause&&ts.isNamedExports(n.exportClause)&&n.exportClause.elements.length>0&&n.exportClause.elements.every(e=>e.isTypeOnly));
@@ -30,8 +35,9 @@ export function jsImports(source:string,file:string):{imports:Import[];warnings:
    const arg=n.arguments[0];if(arg&&(ts.isStringLiteral(arg)||ts.isNoSubstitutionTemplateLiteral(arg)))imports.push({name:arg.text,kind:n.expression.kind===ts.SyntaxKind.ImportKeyword?'dynamic-literal':'require'});
    else warnings.push('Dynamic import/require expression cannot be resolved');
   }
-  ts.forEachChild(n,visit);
- }visit(sf);
+  const children:ts.Node[]=[];ts.forEachChild(n,child=>{children.push(child);});
+  for(let i=children.length-1;i>=0;i--)pending.push(children[i]);
+ }
  return {imports,warnings};
 }
 let language:Promise<Parser.Language>|undefined;

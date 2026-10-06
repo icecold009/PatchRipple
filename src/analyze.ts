@@ -14,7 +14,7 @@ export async function analyze(options:Options):Promise<Graph>{
  const snapshots:Record<Revision,Snapshot>={base:reader.snapshot(change.analysisBaseSha,'base'),head:reader.snapshot(change.headSha,'head')};
  const scans={base:await scan(snapshots.base,'base',roots,reader.deadline),head:await scan(snapshots.head,'head',roots,reader.deadline)};
  const ownerSnapshot=change.baseTipSha===change.analysisBaseSha?snapshots.base:reader.snapshot(change.baseTipSha,'base',['.github/CODEOWNERS','CODEOWNERS','docs/CODEOWNERS']);
- const ownership=compileOwners(ownerSnapshot.files);const warnings:Warning[]=[...scans.base.warnings,...scans.head.warnings,...ownership.warnings,...(ownerSnapshot===snapshots.base?[]:ownerSnapshot.warnings)];
+ const ownership=compileOwners(ownerSnapshot.files);const ownerWarningsAtStart=ownership.warnings.length;const warnings:Warning[]=[...scans.base.warnings,...scans.head.warnings,...ownership.warnings,...(ownerSnapshot===snapshots.base?[]:ownerSnapshot.warnings)];
  for(const c of changes)if(/(?:^|\/)(?:tsconfig[^/]*\.json|package\.json|pyproject\.toml|setup\.cfg)$/.test(c.newPath??c.oldPath??''))warnings.push({code:'CONFIG_CHANGE',path:c.newPath??c.oldPath,detail:'Configuration change may affect relationships beyond statically discovered imports'});
  const included=new Map<string,Set<FileNode['roles'][number]>>();let omittedNodes=0;const omitted=new Set<string>();
  const include=(p:string,role:FileNode['roles'][number]):boolean=>{
@@ -55,6 +55,7 @@ export async function analyze(options:Options):Promise<Graph>{
  const nodes:FileNode[]=[...included].map(([p,roles])=>({
   id:nodeId(p),path:p,roles:[...roles].sort(compare),revisions:(['base','head'] as Revision[]).filter(r=>snapshots[r].paths.has(p)),owners:ownership.match(p),testReasons:[...(testReasons.get(p)??[])].sort(compare)
  })).sort((a,b)=>compare(a.path,b.path));
+ warnings.push(...ownership.warnings.slice(ownerWarningsAtStart));
  const edgeCandidates=[...scans.base.edges,...scans.head.edges].filter(e=>included.has(e.from.slice(5))&&included.has(e.to.slice(5))).sort((a,b)=>compare(JSON.stringify(a),JSON.stringify(b)));
  const edges:Edge[]=edgeCandidates.slice(0,limits.maxEdges);const omittedEdges=edgeCandidates.length-edges.length;
  if(omittedNodes)warnings.push({code:'NODE_LIMIT',detail:omittedNodes+' candidate nodes omitted'});

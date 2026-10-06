@@ -22,6 +22,18 @@ test('named type-only imports and re-exports retain type-only evidence',()=>{
  const result=jsImports("import {type X} from './types'; export {type X} from './types';",'api.ts');
  assert.deepEqual(result.imports.map(i=>i.kind),['type-only','type-only']);
 });
+test('deep JavaScript syntax is traversed without exhausting the call stack',()=>{
+ const source='const value = '+'('.repeat(1000)+'0'+')'.repeat(1000)+';';
+ const result=jsImports(source,'deep.ts');assert.deepEqual(result.imports,[]);assert.ok(result.warnings.some(w=>w.includes('resource limit')));
+});
+test('JavaScript parser resource limits make analyzer completeness explicit',async()=>{
+ const f=fixture({'src/deep.ts':'export const value=0;'});
+ try{
+  const base=git(f.repo,'rev-parse','HEAD');f.write({'src/deep.ts':'export const value='+'('.repeat(1000)+'0'+')'.repeat(1000)+';'});const head=f.commit('deep source');
+  const graph=await analyze({repo:f.repo,base,head,repository});
+  assert.ok(graph.warnings.some(w=>w.code==='DYNAMIC_OR_INVALID_SYNTAX'&&w.path==='src/deep.ts'));assert.equal(graph.completeness.complete,false);
+ }finally{rmSync(f.dir,{recursive:true,force:true});}
+});
 test('paths and repository links reject traversal/options/credentialed schemes',()=>{
  for(const p of ['/x','../x','a/../x','C:/x','a\\x','a\0x'])assert.equal(safePath(p),false);
  assert.equal(safePath('src/hello space\n世界.ts'),true);
@@ -35,6 +47,13 @@ test('CODEOWNERS directory patterns, nonrecursive wildcard tails and inline comm
  const owner=compileOwners(new Map([['CODEOWNERS','* @all\ndocs/* @docs # inline comment\napps/ @apps\n**/logs @logs']]));
  assert.deepEqual(owner.match('docs/intro.md'),['@docs']);assert.deepEqual(owner.match('docs/deep/file.md'),['@all']);
  assert.deepEqual(owner.match('nested/apps/file.ts'),['@apps']);assert.deepEqual(owner.match('deep/logs/file.txt'),['@logs']);assert.equal(owner.warnings.length,0);
+});
+test('CODEOWNERS globstar matching stays bounded for adversarial nonmatches',()=>{
+ const pattern='**/'.repeat(14)+'missing',owner=compileOwners(new Map([['CODEOWNERS',pattern+' @team']]));
+ assert.deepEqual(owner.match('a/'.repeat(14)+'target'),[]);assert.equal(owner.warnings.length,0);
+ const expensive=compileOwners(new Map([['CODEOWNERS','a'.repeat(500)+'* @team']]));
+ for(let i=0;i<12;i++)expensive.match('a'.repeat(4000));
+ assert.ok(expensive.warnings.some(w=>w.detail.includes('deterministic work limit')));
 });
 test('ownership uses current base-tip policy even when PR analysis uses an older merge-base',async()=>{
  const f=fixture({'core.ts':'export const x=1;','CODEOWNERS':'* @old'});

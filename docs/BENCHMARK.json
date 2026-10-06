@@ -1,0 +1,81 @@
+{
+  "date": "2026-10-04T13:56:37.561Z",
+  "platform": "win32",
+  "arch": "x64",
+  "osRelease": "10.0.26200",
+  "cpu": "11th Gen Intel(R) Core(TM) i3-1115G4 @ 3.00GHz",
+  "systemMemoryBytes": 16801976320,
+  "method": "Synthetic temporary Git histories; base and head are scanned; these are performance bounds, not real-repository accuracy evidence.",
+  "scenarios": [
+    {
+      "name": "deep-js-chain-1000-files",
+      "filesPerRevision": 1000,
+      "elapsedMs": 4714,
+      "rssAfterBytes": 172081152,
+      "changedPaths": 1,
+      "nodes": 21,
+      "edges": 40,
+      "complete": false,
+      "omittedNodes": 0,
+      "omittedEdges": 0,
+      "warnings": [
+        "DEPTH_LIMIT"
+      ],
+      "limits": {
+        "maxFiles": 5000,
+        "maxBytes": 41943040,
+        "maxFileBytes": 524288,
+        "maxNodes": 500,
+        "maxEdges": 2000,
+        "maxDepth": 20,
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "wide-js-fanout-651-candidates",
+      "filesPerRevision": 651,
+      "elapsedMs": 2358,
+      "rssAfterBytes": 172470272,
+      "changedPaths": 1,
+      "nodes": 500,
+      "edges": 998,
+      "complete": false,
+      "omittedNodes": 151,
+      "omittedEdges": 0,
+      "warnings": [
+        "NODE_LIMIT"
+      ],
+      "limits": {
+        "maxFiles": 5000,
+        "maxBytes": 41943040,
+        "maxFileBytes": 524288,
+        "maxNodes": 500,
+        "maxEdges": 2000,
+        "maxDepth": 20,
+        "timeoutMs": 60000
+      }
+    },
+    {
+      "name": "python-src-layout-202-files",
+      "filesPerRevision": 202,
+      "elapsedMs": 4817,
+      "rssAfterBytes": 176513024,
+      "changedPaths": 1,
+      "nodes": 201,
+      "edges": 400,
+      "complete": true,
+      "omittedNodes": 0,
+      "omittedEdges": 0,
+      "warnings": [],
+      "limits": {
+        "maxFiles": 5000,
+        "maxBytes": 41943040,
+        "maxFileBytes": 524288,
+        "maxNodes": 500,
+        "maxEdges": 2000,
+        "maxDepth": 20,
+        "timeoutMs": 60000
+      }
+    }
+  ]
+}

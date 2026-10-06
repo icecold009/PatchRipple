@@ -1,0 +1,44 @@
+{
+  "name": "patchripple",
+  "version": "0.1.0",
+  "description": "Repo-local pull request impact maps with explicit static-analysis uncertainty",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "patchripple": "dist/cli.cjs"
+  },
+  "files": [
+    "dist",
+    "action.yml",
+    "README.md",
+    "LICENSE",
+    "schema"
+  ],
+  "scripts": {
+    "lint": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "typecheck": "tsc --noEmit",
+    "build": "node --import tsx scripts/build.mjs",
+    "test": "node --test --import tsx tests/*.test.ts",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run build",
+    "test:browser": "node scripts/browser-check.mjs",
+    "test:browser:fixtures": "node --import tsx scripts/browser-fixtures.ts",
+    "test:package": "node --import tsx scripts/package-smoke.ts",
+    "benchmark": "node --import tsx scripts/benchmark.ts",
+    "demo": "node --import tsx scripts/demo.ts"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "typescript": "6.0.3",
+    "web-tree-sitter": "0.20.8"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0",
+    "tree-sitter-wasms": "0.1.13",
+    "tsx": "4.20.6"
+  }
+}

@@ -1,0 +1,46 @@
+name: PatchRipple
+description: Repo-local static PR impact candidates, tests and owners with an offline bundle
+author: PatchRipple contributors
+inputs:
+  repo:
+    description: Analyzed Git repository (defaults to GITHUB_WORKSPACE)
+  base:
+    description: Full base-tip commit SHA (defaults to PR event base SHA)
+  head:
+    description: Full head commit SHA (defaults to PR event head SHA)
+  repository:
+    description: HTTPS GitHub repository URL (defaults to GITHUB_REPOSITORY)
+  out:
+    description: New output directory outside analyzed repository (defaults to RUNNER_TEMP)
+  python-roots:
+    description: Comma-separated explicit Python roots (. means root)
+    default: '.,src'
+  max-nodes:
+    description: Candidate node ceiling (cannot exceed 500)
+    default: '500'
+  max-depth:
+    description: Reverse traversal depth ceiling (cannot exceed 20)
+    default: '20'
+  max-files:
+    description: File ceiling per revision (cannot exceed 5000)
+    default: '5000'
+  timeout-ms:
+    description: Git/parsing deadline in milliseconds (cannot exceed 60000)
+    default: '60000'
+outputs:
+  bundle-path:
+    description: Absolute path of generated offline bundle
+  changed-count:
+    description: Changed path record count
+  candidate-count:
+    description: Included candidate count
+  warning-count:
+    description: Analysis warning count
+  complete:
+    description: Whether analysis is complete within documented static scope
+runs:
+  using: node24
+  main: dist/action.cjs
+branding:
+  icon: git-pull-request
+  color: blue

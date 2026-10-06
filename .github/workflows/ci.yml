@@ -1,0 +1,39 @@
+name: Trusted PatchRipple CI
+on:
+  push:
+    branches: ['codex/**', main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      # This builds PatchRipple itself; never copy this install/build into a consumer analyzer job.
+      - run: npm ci --ignore-scripts
+      - run: npm run verify
+      - run: npm run demo
+      - run: git diff --exit-code -- dist schema docs/demo
+      - run: npm run test:package
+      - run: npm run test:browser:fixtures
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:browser
+        env:
+          PATCHRIPPLE_BROWSER: chromium
+          PATCHRIPPLE_EDGE_FIXTURES: .tmp/browser-edge-fixtures
+      - run: npm run test:browser
+        env:
+          PATCHRIPPLE_BROWSER: firefox
+          PATCHRIPPLE_EDGE_FIXTURES: .tmp/browser-edge-fixtures
+      - run: npm run test:browser
+        env:
+          PATCHRIPPLE_BROWSER: webkit
+          PATCHRIPPLE_EDGE_FIXTURES: .tmp/browser-edge-fixtures

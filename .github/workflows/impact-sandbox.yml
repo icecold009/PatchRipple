@@ -1,0 +1,45 @@
+name: Static PR impact
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout base-tip into a data-only repository; never execute its scripts.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+      - name: Fetch and verify exact PR objects without checkout/execution
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -eu
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          git -c core.hooksPath=/dev/null fetch --no-tags "https://github.com/$BASE_REPOSITORY.git" "refs/pull/$PR_NUMBER/head"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          git merge-base "$BASE_SHA" "$HEAD_SHA"
+      - uses: icecold009/PatchRipple@528902572d5c6b5f18cf68e4a527472b421fc6ad
+        id: impact
+        with:
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: patchripple-${{ github.event.pull_request.number }}
+          path: ${{ steps.impact.outputs.bundle-path }}
+          retention-days: 14
+          if-no-files-found: error
+

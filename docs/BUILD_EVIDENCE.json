@@ -3,8 +3,8 @@
   "files": {
     "schema/graph-v1.json": "01e61fc7b7e541186a258883427725093f9dca6493c0467a112ad5533010d128",
     "dist/THIRD_PARTY_NOTICES.txt": "65b25f95ef4a7c4364799d4425aa4c604717e20a352daff61b8fab379f864707",
-    "dist/action.cjs": "6f82fb55c5e1100ab0718a79dfb7ed3998609aff5d1f5c7017c6ed0400885c2e",
-    "dist/cli.cjs": "37fb66deba937126d523f749811ba8012818528aa3080b2a99a70838009b11a0",
+    "dist/action.cjs": "6b86c4d57789f31e94d74303f529865de290d48377a0981796a8fb6dd2d30d68",
+    "dist/cli.cjs": "41750ffb85d72a7f11d442c0e8a5733c5e58249b1e59ca97246e469bc655e6d4",
     "dist/tree-sitter-python.wasm": "9056d0fb0c337810d019fae350e8167786119da98f0f282aceae7ab89ee8253b",
     "dist/tree-sitter.wasm": "17382e1a69bd628107e8dfe37d31d57f7ba948e5f2da77e56a8aa010488dc5ae"
   }

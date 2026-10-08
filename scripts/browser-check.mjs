@@ -27,6 +27,25 @@ try{
  assert.ok(await page.locator('svg [data-node="file:src/core.ts"][data-context="true"]').count());assert.ok(await page.locator('svg [data-node="file:src/api.ts"][data-context="true"]').count());assert.ok(await page.locator('svg [data-node="file:src/ui.ts"][data-search-result="false"]').count());
  assert.match(await page.locator('#detail').textContent(),/Analysis base: src\/core.ts → src\/api.ts → src\/ui.ts/);
  assert.match(await page.locator('#detail').textContent(),/Head: src\/core.ts → src\/api.ts → src\/ui.ts/);
+ // Diagram context stays inspectable even when its list row does not match.
+ await page.getByLabel('Find a file').fill('ui.ts');
+ const contextNode=page.locator('svg [data-node="file:src/core.ts"]');
+ for(const activation of ['click','Enter','Space']){
+  await page.locator('#files>li[data-path="src/ui.ts"] button').click();
+  if(activation==='click')await contextNode.click();else{await contextNode.focus();await page.keyboard.press(activation);}
+  assert.equal(await page.locator('#detail h2').textContent(),'src/core.ts');
+  assert.equal(await contextNode.getAttribute('aria-pressed'),'true');
+  assert.equal(await page.getByLabel('Find a file').inputValue(),'ui.ts');
+  assert.equal(await page.locator('#count').textContent(),'1 file shown');
+ }
+ await page.getByLabel('Neighborhood depth',{exact:true}).selectOption('0');
+ assert.equal(await contextNode.getAttribute('aria-pressed'),'true');
+ await page.getByLabel('Revision',{exact:true}).selectOption('head');
+ assert.equal(await contextNode.getAttribute('aria-pressed'),'true');
+ await page.getByLabel('Revision',{exact:true}).selectOption('both');
+ await page.getByLabel('Neighborhood depth',{exact:true}).selectOption('2');
+ await page.getByLabel('Find a file').fill('');
+ await page.locator('#files>li[data-path="src/ui.ts"] button').click();
  assert.ok(await page.locator('#detail a[href*="/blob/"]').count()>=1);assert.ok(await page.locator('#detail a[href*="/compare/"]').count()===0);assert.ok(await page.locator('.detail-tip a[href*="/compare/"]').count()===1);
  await page.getByLabel('Revision',{exact:true}).selectOption('base');assert.ok(await page.locator('path.graph-edge').evaluateAll(edges=>edges.every(edge=>edge.classList.contains('base'))));
  await page.getByLabel('Revision',{exact:true}).selectOption('both');await page.getByLabel('Edge kind',{exact:true}).selectOption('type-only');assert.equal(await page.locator('path.graph-edge').count(),0);await page.getByLabel('Edge kind',{exact:true}).selectOption('all');
@@ -43,6 +62,14 @@ try{
  await page.setViewportSize({width:320,height:800});await page.reload();
  assert.equal(await page.locator('#count').textContent(),'4 files shown');assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.equal(await page.locator('#inspector').getAttribute('open'),null);assert.ok(await page.locator('#explorer').evaluate(el=>el.getBoundingClientRect().top<document.querySelector('.graph-panel').getBoundingClientRect().top));
  await page.locator('#files>li.file-row').first().locator('button').click();await page.waitForFunction(()=>document.getElementById('inspector').open&&document.activeElement===document.getElementById('detail'));assert.ok(await page.locator('#detail').evaluate(el=>el===document.activeElement));const mobileSelected=await page.locator('#detail h2').textContent();await page.getByRole('button',{name:'Back to files'}).click();assert.ok(await page.locator('#inspector').evaluate(el=>!el.open));assert.equal(await page.evaluate(()=>document.activeElement.closest('.file-row')?.dataset.path),mobileSelected);
+ await page.getByLabel('Find a file').fill('ui.ts');
+ await page.locator('svg [data-node="file:src/core.ts"]').click();
+ await page.waitForFunction(()=>document.getElementById('inspector').open&&document.activeElement===document.getElementById('detail'));
+ assert.equal(await page.locator('#detail h2').textContent(),'src/core.ts');
+ await page.getByRole('button',{name:'Back to files'}).click();
+ assert.ok(await page.getByLabel('Find a file').evaluate(el=>el===document.activeElement));
+ assert.equal(await page.getByLabel('Find a file').inputValue(),'ui.ts');
+ await page.getByRole('button',{name:'Clear filters',exact:true}).click();
  if(process.env.PATCHRIPPLE_VISUAL_DIR)await page.screenshot({path:path.join(process.env.PATCHRIPPLE_VISUAL_DIR,'mobile.png'),fullPage:true});
  if(process.env.PATCHRIPPLE_EDGE_FIXTURES){
   for(const name of ['empty','large','incomplete']){
@@ -51,6 +78,19 @@ try{
    if(name==='empty'){assert.equal(await page.locator('#count').textContent(),'0 files shown');assert.ok(await page.locator('#empty').isVisible());}
    if(name==='large'){assert.equal(await page.locator('#count').textContent(),'85 files shown');assert.ok(await page.locator('svg [data-node]').count()<=18);await page.getByLabel('Package group',{exact:true}).selectOption('src');assert.equal(await page.locator('#count').textContent(),'84 files shown');await page.getByLabel('Package group',{exact:true}).selectOption('');await page.locator('#files>li.file-row[data-path="zz-deep-dependent.ts"] button').click();assert.equal(await page.locator('#detail h2').textContent(),'zz-deep-dependent.ts');assert.ok(await page.locator('svg [data-node="file:zz-deep-dependent.ts"]').count());assert.match(await page.locator('#detail').textContent(),/src\/changed.ts.*src\/related\/081.ts.*src\/related\/082.ts.*zz-deep-dependent.ts/s);assert.match(await page.locator('.graph-note').textContent(),/Focused on zz-deep-dependent.ts/);await page.getByLabel('Neighborhood depth',{exact:true}).selectOption('3');assert.ok(await page.locator('svg [data-node="file:src/changed.ts"]').count());}
    if(name==='incomplete'){assert.ok(await page.getByText('Incomplete analysis',{exact:true}).isVisible());assert.equal(await page.locator('.audit').getAttribute('open'),'');assert.match(await page.locator('.audit-body').textContent(),/omitted nodes/);assert.equal(await page.locator('.warning').getAttribute('data-category'),'resource-limit');}
+   if(name==='large'){
+    // A late match must remain selected in the capped graph at both widths.
+    for(const width of [1280,320]){
+     await page.setViewportSize({width,height:800});
+     await page.getByLabel('Find a file').fill('src/related/');
+     await page.locator('#files>li.file-row[data-path="src/related/082.ts"] button').click();
+     assert.equal(await page.locator('#detail h2').textContent(),'src/related/082.ts');
+     assert.equal(await page.locator('svg [data-node="file:src/related/082.ts"]').getAttribute('aria-pressed'),'true');
+     assert.ok(await page.locator('svg [data-node]').count()<=18);
+     assert.equal(await page.locator('#count').textContent(),'83 files shown');
+     assert.match(await page.locator('#map-svg').getAttribute('aria-label'),/18 matching files/);
+    }
+   }
   }
  }
  if(!process.env.PATCHRIPPLE_DEMO_PATH){const readme=await readFile(path.resolve('README.md'),'utf8');assert.match(readme,/!\[[^\]]+\]\(docs\/demo\/preview\.gif\)/);const preview=await readFile(path.resolve('docs/demo/preview.gif'));assert.match(preview.subarray(0,6).toString('ascii'),/^GIF8[79]a$/);assert.ok(preview.length<1_000_000);

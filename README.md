@@ -17,6 +17,7 @@ PatchRipple reads exact Git revisions and maps changed files to potential import
 - Adds related-test hints and uses CODEOWNERS from the base revision.
 - Produces an offline HTML report, JSON graph, SVG map, and metadata file.
 - Shows uncertainty, warnings, and analysis limits instead of presenting guesses as proof.
+- Keeps file selection inspectable from the file list or graph and announces selection changes with an accessible status message.
 
 The analyzer and Action read repository data and create the report in the environment where you run them. The explicit `fetch-pr` command retrieves only a public GitHub base branch and PR head into PatchRipple-owned refs. These commands do not execute code, configuration, or hooks from the repository being analyzed, and they do not install its dependencies.
 
@@ -29,11 +30,11 @@ The animated preview above and the [clickable walkthrough](docs/demo/walkthrough
 Use Node.js 24 or newer and npm. This snapshot has no versioned GitHub release or tag, and the public npm registry has no `patchripple` package. To install the verified open PR #7 candidate from an immutable source archive, without cloning Git:
 
 ~~~sh
-npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/c84ba41712a01106efcb2a131ee493b41d994624.tar.gz"
+npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/882829946897c3ce461aa0e0169700f569231b78.tar.gz"
 patchripple --version
 ~~~
 
-The pinned code-bearing commit `c84ba41712a01106efcb2a131ee493b41d994624` passed local lint, typecheck, all 61 tests, build, package smoke, generated-file consistency, and exact-head hosted [Trusted CI #74](https://github.com/icecold009/PatchRipple/actions/runs/38431475643) and [Static PR impact #28](https://github.com/icecold009/PatchRipple/actions/runs/38431475710). CI #74 includes generated browser fixtures and Chromium, Firefox, and WebKit checks. The full-SHA archive installed into an isolated npm prefix; `patchripple --version` and `--help` succeeded. PR #7 remains an open draft; this candidate is not merged or a versioned release. The merged `main` pin is `4b45616e941ebe349b845a62a8941c586fbb18c5`. Review [release evidence](docs/RELEASE_EVIDENCE.md) before choosing a source revision.
+The pinned code-bearing commit `882829946897c3ce461aa0e0169700f569231b78` passed local lint, typecheck, all 61 tests, build, package smoke, generated-file consistency, and exact-head hosted [Trusted CI #77](https://github.com/icecold009/PatchRipple/actions/runs/38434003043) and [Static PR impact #30](https://github.com/icecold009/PatchRipple/actions/runs/38434009393). CI #77 includes generated browser fixtures and Chromium, Firefox, and WebKit checks. The report also exposes selected-file details as a named region and announces selection changes through a polite status region; automated browser checks do not establish screen-reader comprehension. The full-SHA archive installed into an isolated npm prefix; `patchripple --version` and `--help` succeeded. PR #7 remains an open draft; this candidate is not merged or a versioned release. The merged `main` pin is `4b45616e941ebe349b845a62a8941c586fbb18c5`. Review [release evidence](docs/RELEASE_EVIDENCE.md) before choosing a source revision.
 
 For a public GitHub PR whose exact commits are missing from the target clone, fetch the base branch and PR head into PatchRipple-owned refs:
 

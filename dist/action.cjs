@@ -220218,6 +220218,7 @@ var import_node_url = require("node:url");
 var js = /\.[cm]?[jt]sx?$/;
 var MAX_WORKSPACE_PATTERNS = 256;
 var MAX_WORKSPACE_PATTERN_LENGTH = 512;
+var MAX_WORKSPACE_BRACE_ALTERNATIVES = 16;
 var MAX_WORKSPACE_PATH_LENGTH = 4096;
 var MAX_WORKSPACE_GLOB_WORK = 2e6;
 var MAX_EXPORTS_CONDITION_DEPTH = 64;
@@ -220299,6 +220300,16 @@ function pnpmWorkspacePatterns(text) {
   }
   if (!found) return { patterns, error: "A top-level packages list was not found" };
   return { patterns };
+}
+function expandWorkspaceAlternatives(pattern) {
+  const opens = (pattern.match(/{/g) ?? []).length, closes = (pattern.match(/}/g) ?? []).length;
+  if (opens === 0 && closes === 0) return [pattern];
+  if (opens !== 1 || closes !== 1) return;
+  const start2 = pattern.indexOf("{"), end = pattern.indexOf("}");
+  if (end < start2) return;
+  const alternatives = pattern.slice(start2 + 1, end).split(",");
+  if (alternatives.length < 2 || alternatives.length > MAX_WORKSPACE_BRACE_ALTERNATIVES || alternatives.some((value) => !value)) return;
+  return alternatives.map((value) => pattern.slice(0, start2) + value + pattern.slice(end + 1));
 }
 function jsImports(source, file) {
   const imports = [], warnings = [];
@@ -220470,20 +220481,23 @@ async function scan(snapshot, revision2, roots, deadline) {
       continue;
     }
     const exclude = raw.startsWith("!"), pattern = raw.replace(/^!/, "").replace(/^\.\//, "").replace(/\/$/, "");
-    if (pattern.includes("{") || pattern.includes("[") || pattern.includes("]") || pattern.length > MAX_WORKSPACE_PATTERN_LENGTH || !safePath(pattern.replaceAll("*", "x").replaceAll("?", "x"))) {
+    const expanded = pattern.length <= MAX_WORKSPACE_PATTERN_LENGTH ? expandWorkspaceAlternatives(pattern) : void 0;
+    if (!expanded || expanded.some((value) => value.includes("[") || value.includes("]") || value.length > MAX_WORKSPACE_PATTERN_LENGTH || !safePath(value.replaceAll("*", "x").replaceAll("?", "x")))) {
       warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Unsupported or oversized workspace pattern: " + raw);
       continue;
     }
-    const chars = Array.from(pattern), tokens = [];
-    for (let i = 0; i < chars.length; i++) {
-      if (chars[i] === "*") {
-        const crossesSlash = chars[i + 1] === "*";
-        tokens.push({ kind: "star", crossesSlash });
-        if (crossesSlash) i++;
-      } else if (chars[i] === "?") tokens.push({ kind: "one" });
-      else tokens.push({ kind: "literal", value: chars[i] });
+    for (const expandedPattern of expanded) {
+      const chars = Array.from(expandedPattern), tokens = [];
+      for (let i = 0; i < chars.length; i++) {
+        if (chars[i] === "*") {
+          const crossesSlash = chars[i + 1] === "*";
+          tokens.push({ kind: "star", crossesSlash });
+          if (crossesSlash) i++;
+        } else if (chars[i] === "?") tokens.push({ kind: "one" });
+        else tokens.push({ kind: "literal", value: chars[i] });
+      }
+      workspacePatterns.push({ exclude, tokens });
     }
-    workspacePatterns.push({ exclude, tokens });
   }
   const includePatterns = workspacePatterns.filter((pattern) => !pattern.exclude), excludePatterns = workspacePatterns.filter((pattern) => pattern.exclude);
   const workspaces = /* @__PURE__ */ new Map();

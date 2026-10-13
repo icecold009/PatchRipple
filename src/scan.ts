@@ -8,6 +8,7 @@ declare const __ASSET_DIR__:string;
 const js=/\.[cm]?[jt]sx?$/;
 const MAX_WORKSPACE_PATTERNS=256;
 const MAX_WORKSPACE_PATTERN_LENGTH=512;
+const MAX_WORKSPACE_BRACE_ALTERNATIVES=16;
 const MAX_WORKSPACE_PATH_LENGTH=4096;
 const MAX_WORKSPACE_GLOB_WORK=2_000_000;
 const MAX_EXPORTS_CONDITION_DEPTH=64;
@@ -56,6 +57,15 @@ function pnpmWorkspacePatterns(text:string):{patterns:string[];error?:string} {
  }
  if(!found)return {patterns,error:'A top-level packages list was not found'};
  return {patterns};
+}
+function expandWorkspaceAlternatives(pattern:string):string[]|undefined {
+ const opens=(pattern.match(/{/g)??[]).length,closes=(pattern.match(/}/g)??[]).length;
+ if(opens===0&&closes===0)return [pattern];
+ if(opens!==1||closes!==1)return;
+ const start=pattern.indexOf('{'),end=pattern.indexOf('}');if(end<start)return;
+ const alternatives=pattern.slice(start+1,end).split(',');
+ if(alternatives.length<2||alternatives.length>MAX_WORKSPACE_BRACE_ALTERNATIVES||alternatives.some(value=>!value))return;
+ return alternatives.map(value=>pattern.slice(0,start)+value+pattern.slice(end+1));
 }
 export interface Scan {edges:Edge[];warnings:Warning[]}
 interface Import {name:string;kind:Kind;members?:string[]}
@@ -160,16 +170,19 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
  if(!workspacePatternLimitExceeded)for(const raw of workspacesRaw){
   if(typeof raw!=='string'){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported workspace pattern: '+String(raw));continue;}
   const exclude=raw.startsWith('!'),pattern=raw.replace(/^!/,'').replace(/^\.\//,'').replace(/\/$/,'');
-  if(pattern.includes('{')||pattern.includes('[')||pattern.includes(']')||pattern.length>MAX_WORKSPACE_PATTERN_LENGTH||!safePath(pattern.replaceAll('*','x').replaceAll('?','x'))){
-   warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported or oversized workspace pattern: '+raw);continue;
+   const expanded=pattern.length<=MAX_WORKSPACE_PATTERN_LENGTH?expandWorkspaceAlternatives(pattern):undefined;
+   if(!expanded||expanded.some(value=>value.includes('[')||value.includes(']')||value.length>MAX_WORKSPACE_PATTERN_LENGTH||!safePath(value.replaceAll('*','x').replaceAll('?','x')))){
+    warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported or oversized workspace pattern: '+raw);continue;
+   }
+   for(const expandedPattern of expanded){
+    const chars=Array.from(expandedPattern),tokens:WorkspacePattern['tokens']=[];
+    for(let i=0;i<chars.length;i++){
+     if(chars[i]==='*'){const crossesSlash=chars[i+1]==='*';tokens.push({kind:'star',crossesSlash});if(crossesSlash)i++;}
+     else if(chars[i]==='?')tokens.push({kind:'one'});
+     else tokens.push({kind:'literal',value:chars[i]});
+    }
+    workspacePatterns.push({exclude,tokens});
   }
-  const chars=Array.from(pattern),tokens:WorkspacePattern['tokens']=[];
-  for(let i=0;i<chars.length;i++){
-   if(chars[i]==='*'){const crossesSlash=chars[i+1]==='*';tokens.push({kind:'star',crossesSlash});if(crossesSlash)i++;}
-   else if(chars[i]==='?')tokens.push({kind:'one'});
-   else tokens.push({kind:'literal',value:chars[i]});
-  }
-  workspacePatterns.push({exclude,tokens});
  }
  const includePatterns=workspacePatterns.filter(pattern=>!pattern.exclude),excludePatterns=workspacePatterns.filter(pattern=>pattern.exclude);
  const workspaces=new Map<string,{dir:string;manifest:Record<string,unknown>}>();

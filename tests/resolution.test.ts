@@ -111,6 +111,19 @@ test('pnpm workspace YAML simple include and exclude patterns resolve local pack
  assert.ok(result.warnings.some(w=>w.code==='EXPECTED_EXTERNAL_IMPORT'&&w.path==='api.ts'));
  assert.equal(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='pnpm-workspace.yaml'),false);
 });
+test('workspace brace alternatives resolve bounded package patterns',async()=>{
+ const result=await scanFiles({'package.json':JSON.stringify({workspaces:['packages/{core,ui}/*']}),'packages/ui/widget/package.json':JSON.stringify({name:'@demo/widget',exports:{'.':'./src/index.js'}}),'packages/ui/widget/src/index.js':'export const widget=true;','api.ts':"import '@demo/widget';"});
+ assert.deepEqual(result.edges.map(e=>e.to),['file:packages/ui/widget/src/index.js']);assert.equal(result.warnings.length,0);
+});
+test('unsupported workspace character classes remain explicit',async()=>{
+ const result=await scanFiles({'package.json':JSON.stringify({workspaces:['packages/[ab]/*']}),'packages/a/widget/package.json':JSON.stringify({name:'@demo/widget'}),'api.ts':"import '@demo/widget';"});
+ assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json'&&w.detail.includes('Unsupported or oversized workspace pattern')));
+});
+test('nested and oversized workspace brace alternatives remain explicit',async()=>{
+ const alternatives=Array.from({length:17},(_,index)=>String.fromCharCode(97+index)).join(',');
+ const result=await scanFiles({'package.json':JSON.stringify({workspaces:['packages/{core,{ui,docs}}/*',`packages/{${alternatives}}/*`]})});
+ assert.equal(result.warnings.filter(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json').length,2);
+});
 test('unsupported pnpm workspace YAML stays visibly incomplete instead of guessing',async()=>{
  const result=await scanFiles({
   'pnpm-workspace.yaml':'packages: [packages/*]\n',

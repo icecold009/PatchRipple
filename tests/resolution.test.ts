@@ -59,6 +59,18 @@ test('CLI ceiling violations and empty required values are usage errors',async()
  for(const [flag,value]of [['--max-nodes','501'],['--max-depth','21'],['--max-files','5001'],['--timeout-ms','60001']])assert.equal(await main([...args,flag,value]),2);
  assert.equal(await main(['analyze','--repo','','--base','HEAD','--head','HEAD','--repository','https://github.com/example/project','--out','unused']),2);
 });
+test('fetch-pr rejects malformed targets before network access and protects existing refs',async()=>{
+ const f=fixture({'core.ts':'export const x=1;'}),args=['fetch-pr','--repo',f.repo,'--repository','example/project','--base-branch','main','--pr','1'];
+ try{
+  assert.equal(await main([...args.slice(0,4),'https://github.com/example/project',...args.slice(5)]),2);
+  assert.equal(await main([...args.slice(0,-1),'0']),2);
+  git(f.repo,'config','url.ssh://git@github.com/.insteadOf','https://github.com/');
+  assert.equal(await main([...args.slice(0,6),'../main',...args.slice(7)]),1);
+  assert.equal(await main(args),1);
+  for(const ref of ['refs/patchripple/manual/base','refs/patchripple/manual/head'])assert.throws(()=>git(f.repo,'show-ref','--verify','--quiet',ref));
+  assert.equal(git(f.repo,'status','--porcelain'),'');
+ }finally{rmSync(f.dir,{recursive:true,force:true});}
+});
 test('TypeScript project-reference build semantics are reported as unsupported',async()=>{
  const result=await scanFiles({'tsconfig.json':JSON.stringify({references:[{path:'./packages/core'}]}),'src/api.ts':'export const api=1;'});
  assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='tsconfig.json'&&w.detail.includes('project references are not modeled')));

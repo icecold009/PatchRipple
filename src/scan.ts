@@ -15,7 +15,7 @@ const MAX_WORKSPACE_GLOB_WORK=2_000_000;
 const MAX_EXPORTS_CONDITION_DEPTH=64;
 const MAX_EXPORTS_CONDITION_NODES=4096;
 const MAX_JS_AST_NODES=100_000;
-function yamlWorkspaceScalar(raw:string):string|undefined {
+function withoutYamlComment(raw:string):string|undefined {
  let quote:'"'|"'"|undefined,comment=raw.length;
  for(let i=0;i<raw.length;i++){
   const character=raw[i];
@@ -26,7 +26,10 @@ function yamlWorkspaceScalar(raw:string):string|undefined {
   if(!quote&&character==='#'&&(i===0||/\s/.test(raw[i-1]))){comment=i;break;}
  }
  if(quote)return;
- const value=raw.slice(0,comment).trim();if(!value)return;
+ return raw.slice(0,comment).trim();
+}
+function yamlWorkspaceScalar(raw:string):string|undefined {
+ const value=withoutYamlComment(raw);if(!value)return;
  if(value.startsWith("'")){
   if(!value.endsWith("'")||value.length<2)return;
   let result='';
@@ -39,17 +42,43 @@ function yamlWorkspaceScalar(raw:string):string|undefined {
  if('!&*|>{[`,'.includes(value[0])||/:\s/.test(value))return;
  return value;
 }
+function yamlWorkspaceFlowSequence(raw:string):string[]|undefined {
+ const value=withoutYamlComment(raw)?.trim();if(!value||!value.startsWith('[')||!value.endsWith(']'))return;
+ const body=value.slice(1,-1);if(!body.trim())return [];
+ const result:string[]=[];let quote:'"'|"'"|undefined,start=0;
+ const push=(end:number):boolean=>{const item=yamlWorkspaceScalar(body.slice(start,end));if(item===undefined)return false;result.push(item);start=end+1;return true;};
+ for(let i=0;i<body.length;i++){
+  const character=body[i];
+  if(quote==='"'&&character==='\\'){i++;continue;}
+  if(quote==="'"&&character==="'"&&body[i+1]==="'"){i++;continue;}
+  if(quote&&character===quote){quote=undefined;continue;}
+  if(!quote&&(character==='"'||character==="'")){quote=character;continue;}
+  if(!quote&&(character==='['||character==='{'||character==='}'||character===']'))return;
+  if(!quote&&character===','&&!push(i))return;
+ }
+ if(quote||!push(body.length))return;
+ return result;
+}
 function pnpmWorkspacePatterns(text:string):{patterns:string[];error?:string} {
- let inPackages=false,found=false;const patterns:string[]=[];
+ let inPackages=false,found=false,afterFlowSequence=false;const patterns:string[]=[];
  for(const line of text.replace(/^\uFEFF/,'').split(/\r?\n/)){
   const trimmed=line.trim();if(!trimmed||trimmed.startsWith('#'))continue;
   if(!/^\s/.test(line)){
-   inPackages=false;
+   inPackages=false;afterFlowSequence=false;
    const entry=/^packages:\s*(.*)$/.exec(line);
-   if(entry){found=true;if(entry[1].replace(/\s+#.*$/,'').trim())return {patterns,error:'Inline packages values are unsupported; use a simple YAML list'};inPackages=true;}
+   if(entry){
+    if(found)return {patterns,error:'Duplicate top-level packages key'};
+    found=true;const value=withoutYamlComment(entry[1]);if(value===undefined)return {patterns,error:'Malformed YAML packages value'};
+    if(!value){inPackages=true;continue;}
+    if(value.startsWith('[')){
+     const inline=yamlWorkspaceFlowSequence(value);if(!inline)return {patterns,error:'Inline workspace values must be a simple YAML string sequence'};
+     patterns.push(...inline);afterFlowSequence=true;continue;
+    }
+    return {patterns,error:'Workspace declarations must use a block list or a simple inline string sequence'};
+   }
    continue;
   }
-  if(!inPackages)continue;
+  if(!inPackages){if(afterFlowSequence&&/^\s+-/.test(line))return {patterns,error:'Do not mix inline and block workspace entries'};continue;}
   const item=/^\s{2,}-\s*(.*)$/.exec(line);
   if(!item)return {patterns,error:'Workspace entries must be simple package pattern strings'};
   const pattern=yamlWorkspaceScalar(item[1]);
@@ -60,22 +89,43 @@ function pnpmWorkspacePatterns(text:string):{patterns:string[];error?:string} {
  return {patterns};
 }
 function expandWorkspaceAlternatives(pattern:string):string[]|undefined {
- const expanded=[''];let cursor=0;
- while(cursor<pattern.length){
-  const start=pattern.indexOf('{',cursor),unexpectedClose=pattern.indexOf('}',cursor);
-  if(unexpectedClose!==-1&&(start===-1||unexpectedClose<start))return;
-  if(start===-1)break;
-  const end=pattern.indexOf('}',start+1),nested=pattern.indexOf('{',start+1);
-  if(end===-1||nested!==-1&&nested<end)return;
-  const alternatives=pattern.slice(start+1,end).split(',');
-  if(alternatives.length<2||alternatives.length>MAX_WORKSPACE_BRACE_ALTERNATIVES||alternatives.some(value=>!value))return;
-  if(expanded.length*alternatives.length>MAX_WORKSPACE_BRACE_EXPANSIONS)return;
-  const prefix=pattern.slice(cursor,start),next:string[]=[];
-  for(const existing of expanded)for(const alternative of alternatives)next.push(existing+prefix+alternative);
-  expanded.splice(0,expanded.length,...next);cursor=end+1;
- }
- if(pattern.indexOf('}',cursor)!==-1)return;
- const suffix=pattern.slice(cursor);return expanded.map(value=>value+suffix);
+ const classEnd=(value:string,start:number):number=>{for(let i=start+1;i<value.length;i++){if(value[i]==='\\')return -1;if(value[i]===']')return i;}return -1;};
+ const braceEnd=(value:string,start:number):number=>{
+  let depth=0;
+  for(let i=start;i<value.length;i++){
+   if(value[i]==='['){const end=classEnd(value,i);if(end<0)return -1;i=end;continue;}
+   if(value[i]==='{')depth++;
+   else if(value[i]==='}'){depth--;if(depth===0)return i;if(depth<0)return -1;}
+  }
+  return -1;
+ };
+ const split=(value:string):string[]|undefined=>{
+  const parts:string[]=[];let depth=0,start=0,hasComma=false;
+  for(let i=0;i<value.length;i++){
+   if(value[i]==='['){const end=classEnd(value,i);if(end<0)return;i=end;continue;}
+   if(value[i]==='{')depth++;
+   else if(value[i]==='}'){depth--;if(depth<0)return;}
+   else if(value[i]===','&&depth===0){parts.push(value.slice(start,i));start=i+1;hasComma=true;}
+  }
+  if(!hasComma||depth!==0)return;
+  parts.push(value.slice(start));return parts;
+ };
+ const expand=(value:string):string[]|undefined=>{
+  let expanded=[''];
+  for(let i=0;i<value.length;i++){
+   if(value[i]==='['){const end=classEnd(value,i);if(end<0)return;const part=value.slice(i,end+1);expanded=expanded.map(prefix=>prefix+part);i=end;continue;}
+   if(value[i]==='}')return;
+   if(value[i]!=='{'){expanded=expanded.map(prefix=>prefix+value[i]);continue;}
+   const end=braceEnd(value,i);if(end<0)return;
+   const alternatives=split(value.slice(i+1,end));if(!alternatives||alternatives.length<2||alternatives.length>MAX_WORKSPACE_BRACE_ALTERNATIVES||alternatives.some(part=>!part))return;
+   const expandedAlternatives:string[]=[];
+   for(const alternative of alternatives){const items=expand(alternative);if(!items||expandedAlternatives.length+items.length>MAX_WORKSPACE_BRACE_EXPANSIONS)return;expandedAlternatives.push(...items);}
+   if(expanded.length*expandedAlternatives.length>MAX_WORKSPACE_BRACE_EXPANSIONS)return;
+   const next:string[]=[];for(const prefix of expanded)for(const alternative of expandedAlternatives)next.push(prefix+alternative);expanded=next;i=end;
+  }
+  return expanded;
+ };
+ return expand(pattern);
 }
 export interface Scan {edges:Edge[];warnings:Warning[]}
 interface Import {name:string;kind:Kind;members?:string[]}
@@ -173,7 +223,8 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
    warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'pnpm-workspace.yaml and package.json declare different workspace patterns; workspace resolution was skipped');workspacesRaw=[];
   }else workspacesRaw=parsed.patterns;
  }
- type WorkspacePattern={exclude:boolean;tokens:({kind:'literal';value:string}|{kind:'one'}|{kind:'star';crossesSlash:boolean})[]};
+ type WorkspaceToken={kind:'literal';value:string}|{kind:'one'}|{kind:'star';crossesSlash:boolean}|{kind:'globstar-directory'}|{kind:'class';negated:boolean;ranges:[number,number][]};
+ type WorkspacePattern={exclude:boolean;tokens:WorkspaceToken[]};
  const workspacePatterns:WorkspacePattern[]=[];
  const workspacePatternLimitExceeded=workspacesRaw.length>MAX_WORKSPACE_PATTERNS;
  let expandedWorkspacePatternCount=0,workspaceExpansionLimitExceeded=false;
@@ -182,20 +233,39 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   if(typeof raw!=='string'){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported workspace pattern: '+String(raw));continue;}
   const exclude=raw.startsWith('!'),pattern=raw.replace(/^!/,'').replace(/^\.\//,'').replace(/\/$/,'');
    const expanded=pattern.length<=MAX_WORKSPACE_PATTERN_LENGTH?expandWorkspaceAlternatives(pattern):undefined;
-   if(!expanded||expanded.some(value=>value.includes('[')||value.includes(']')||value.length>MAX_WORKSPACE_PATTERN_LENGTH||!safePath(value.replaceAll('*','x').replaceAll('?','x')))){
+   if(!expanded||expanded.some(value=>value.length>MAX_WORKSPACE_PATTERN_LENGTH||!safePath(value.replaceAll('*','x').replaceAll('?','x')))){
     warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported or oversized workspace pattern: '+raw);continue;
    }
    if(expandedWorkspacePatternCount+expanded.length>MAX_WORKSPACE_PATTERNS){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Workspace pattern expansion exceeds 256; workspace resolution was skipped');workspaceExpansionLimitExceeded=true;break;}
-   expandedWorkspacePatternCount+=expanded.length;
+   expandedWorkspacePatternCount+=expanded.length;const workspacePatternStart=workspacePatterns.length;let invalidClassPattern=false;
    for(const expandedPattern of expanded){
-    const chars=Array.from(expandedPattern),tokens:WorkspacePattern['tokens']=[];
+    const chars=Array.from(expandedPattern),tokens:WorkspaceToken[]=[];let unsupportedClass=false;
     for(let i=0;i<chars.length;i++){
-     if(chars[i]==='*'){const crossesSlash=chars[i+1]==='*';tokens.push({kind:'star',crossesSlash});if(crossesSlash)i++;}
+     if(chars[i]==='*'){
+      const crossesSlash=chars[i+1]==='*';
+      if(crossesSlash&&chars[i+2]==='/'){tokens.push({kind:'globstar-directory'});i+=2;}
+      else{tokens.push({kind:'star',crossesSlash});if(crossesSlash)i++;}
+     }
      else if(chars[i]==='?')tokens.push({kind:'one'});
+     else if(chars[i]==='['){
+      const end=chars.indexOf(']',i+1);if(end<0){unsupportedClass=true;break;}
+      let body=chars.slice(i+1,end),negated=false;if(body[0]==='!'||body[0]==='^'){negated=true;body=body.slice(1);}
+      if(!body.length||body.some(character=>character==='/'||character==='\\'||character==='[')){unsupportedClass=true;break;}
+      const ranges:[number,number][]=[];
+      for(let j=0;j<body.length;j++){
+       const first=body[j].codePointAt(0)!;
+       if(j+2<body.length&&body[j+1]==='-'&&body[j+2]!=='-'){
+        const last=body[j+2].codePointAt(0)!;if(first>last){unsupportedClass=true;break;}ranges.push([first,last]);j+=2;
+       }else ranges.push([first,first]);
+      }
+      if(unsupportedClass)break;tokens.push({kind:'class',negated,ranges});i=end;
+     }
      else tokens.push({kind:'literal',value:chars[i]});
     }
+    if(unsupportedClass){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Malformed or unsupported workspace character class: '+raw);invalidClassPattern=true;break;}
     workspacePatterns.push({exclude,tokens});
   }
+  if(invalidClassPattern){workspacePatterns.length=workspacePatternStart;continue;}
  }
  const includePatterns=workspacePatternLimitExceeded||workspaceExpansionLimitExceeded?[]:workspacePatterns.filter(pattern=>!pattern.exclude),excludePatterns=workspacePatternLimitExceeded||workspaceExpansionLimitExceeded?[]:workspacePatterns.filter(pattern=>pattern.exclude);
  const workspaces=new Map<string,{dir:string;manifest:Record<string,unknown>}>();
@@ -208,7 +278,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
    while(pending.length){
     if(++workspaceGlobWork>MAX_WORKSPACE_GLOB_WORK){workspaceGlobLimitExceeded=true;return;}
     const state=pending.pop()!,token=pattern.tokens[state];
-    if(token?.kind==='star'&&!closed.has(state+1)){closed.add(state+1);pending.push(state+1);}
+    if((token?.kind==='star'||token?.kind==='globstar-directory')&&!closed.has(state+1)){closed.add(state+1);pending.push(state+1);}
    }
    return closed;
   };
@@ -219,7 +289,12 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
     if(++workspaceGlobWork>MAX_WORKSPACE_GLOB_WORK){workspaceGlobLimitExceeded=true;return;}
     const token=pattern.tokens[state];if(!token)continue;
     if(token.kind==='star'){if(token.crossesSlash||character!=='/')next.add(state);}
+    else if(token.kind==='globstar-directory'){next.add(state);if(character==='/')next.add(state+1);}
     else if(token.kind==='one'){if(character!=='/')next.add(state+1);}
+    else if(token.kind==='class'){
+     const point=character.codePointAt(0)!,matched=token.ranges.some(([start,end])=>point>=start&&point<=end);
+     if(character!=='/'&&(token.negated?!matched:matched))next.add(state+1);
+    }
     else if(token.value===character)next.add(state+1);
    }
    if(next.size===0)return false;

@@ -220239,7 +220239,7 @@ var MAX_WORKSPACE_GLOB_WORK = 2e6;
 var MAX_EXPORTS_CONDITION_DEPTH = 64;
 var MAX_EXPORTS_CONDITION_NODES = 4096;
 var MAX_JS_AST_NODES = 1e5;
-function yamlWorkspaceScalar(raw) {
+function withoutYamlComment(raw) {
   let quote, comment = raw.length;
   for (let i = 0; i < raw.length; i++) {
     const character = raw[i];
@@ -220265,7 +220265,10 @@ function yamlWorkspaceScalar(raw) {
     }
   }
   if (quote) return;
-  const value = raw.slice(0, comment).trim();
+  return raw.slice(0, comment).trim();
+}
+function yamlWorkspaceScalar(raw) {
+  const value = withoutYamlComment(raw);
   if (!value) return;
   if (value.startsWith("'")) {
     if (!value.endsWith("'") || value.length < 2) return;
@@ -220290,23 +220293,78 @@ function yamlWorkspaceScalar(raw) {
   if ("!&*|>{[`,".includes(value[0]) || /:\s/.test(value)) return;
   return value;
 }
+function yamlWorkspaceFlowSequence(raw) {
+  const value = withoutYamlComment(raw)?.trim();
+  if (!value || !value.startsWith("[") || !value.endsWith("]")) return;
+  const body2 = value.slice(1, -1);
+  if (!body2.trim()) return [];
+  const result = [];
+  let quote, start2 = 0;
+  const push = (end) => {
+    const item = yamlWorkspaceScalar(body2.slice(start2, end));
+    if (item === void 0) return false;
+    result.push(item);
+    start2 = end + 1;
+    return true;
+  };
+  for (let i = 0; i < body2.length; i++) {
+    const character = body2[i];
+    if (quote === '"' && character === "\\") {
+      i++;
+      continue;
+    }
+    if (quote === "'" && character === "'" && body2[i + 1] === "'") {
+      i++;
+      continue;
+    }
+    if (quote && character === quote) {
+      quote = void 0;
+      continue;
+    }
+    if (!quote && (character === '"' || character === "'")) {
+      quote = character;
+      continue;
+    }
+    if (!quote && (character === "[" || character === "{" || character === "}" || character === "]")) return;
+    if (!quote && character === "," && !push(i)) return;
+  }
+  if (quote || !push(body2.length)) return;
+  return result;
+}
 function pnpmWorkspacePatterns(text) {
-  let inPackages = false, found = false;
+  let inPackages = false, found = false, afterFlowSequence = false;
   const patterns = [];
   for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     if (!/^\s/.test(line)) {
       inPackages = false;
+      afterFlowSequence = false;
       const entry = /^packages:\s*(.*)$/.exec(line);
       if (entry) {
+        if (found) return { patterns, error: "Duplicate top-level packages key" };
         found = true;
-        if (entry[1].replace(/\s+#.*$/, "").trim()) return { patterns, error: "Inline packages values are unsupported; use a simple YAML list" };
-        inPackages = true;
+        const value = withoutYamlComment(entry[1]);
+        if (value === void 0) return { patterns, error: "Malformed YAML packages value" };
+        if (!value) {
+          inPackages = true;
+          continue;
+        }
+        if (value.startsWith("[")) {
+          const inline = yamlWorkspaceFlowSequence(value);
+          if (!inline) return { patterns, error: "Inline workspace values must be a simple YAML string sequence" };
+          patterns.push(...inline);
+          afterFlowSequence = true;
+          continue;
+        }
+        return { patterns, error: "Workspace declarations must use a block list or a simple inline string sequence" };
       }
       continue;
     }
-    if (!inPackages) continue;
+    if (!inPackages) {
+      if (afterFlowSequence && /^\s+-/.test(line)) return { patterns, error: "Do not mix inline and block workspace entries" };
+      continue;
+    }
     const item = /^\s{2,}-\s*(.*)$/.exec(line);
     if (!item) return { patterns, error: "Workspace entries must be simple package pattern strings" };
     const pattern = yamlWorkspaceScalar(item[1]);
@@ -220317,25 +220375,90 @@ function pnpmWorkspacePatterns(text) {
   return { patterns };
 }
 function expandWorkspaceAlternatives(pattern) {
-  const expanded = [""];
-  let cursor = 0;
-  while (cursor < pattern.length) {
-    const start2 = pattern.indexOf("{", cursor), unexpectedClose = pattern.indexOf("}", cursor);
-    if (unexpectedClose !== -1 && (start2 === -1 || unexpectedClose < start2)) return;
-    if (start2 === -1) break;
-    const end = pattern.indexOf("}", start2 + 1), nested = pattern.indexOf("{", start2 + 1);
-    if (end === -1 || nested !== -1 && nested < end) return;
-    const alternatives = pattern.slice(start2 + 1, end).split(",");
-    if (alternatives.length < 2 || alternatives.length > MAX_WORKSPACE_BRACE_ALTERNATIVES || alternatives.some((value) => !value)) return;
-    if (expanded.length * alternatives.length > MAX_WORKSPACE_BRACE_EXPANSIONS) return;
-    const prefix = pattern.slice(cursor, start2), next = [];
-    for (const existing of expanded) for (const alternative of alternatives) next.push(existing + prefix + alternative);
-    expanded.splice(0, expanded.length, ...next);
-    cursor = end + 1;
-  }
-  if (pattern.indexOf("}", cursor) !== -1) return;
-  const suffix = pattern.slice(cursor);
-  return expanded.map((value) => value + suffix);
+  const classEnd = (value, start2) => {
+    for (let i = start2 + 1; i < value.length; i++) {
+      if (value[i] === "\\") return -1;
+      if (value[i] === "]") return i;
+    }
+    return -1;
+  };
+  const braceEnd = (value, start2) => {
+    let depth = 0;
+    for (let i = start2; i < value.length; i++) {
+      if (value[i] === "[") {
+        const end = classEnd(value, i);
+        if (end < 0) return -1;
+        i = end;
+        continue;
+      }
+      if (value[i] === "{") depth++;
+      else if (value[i] === "}") {
+        depth--;
+        if (depth === 0) return i;
+        if (depth < 0) return -1;
+      }
+    }
+    return -1;
+  };
+  const split = (value) => {
+    const parts = [];
+    let depth = 0, start2 = 0, hasComma = false;
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] === "[") {
+        const end = classEnd(value, i);
+        if (end < 0) return;
+        i = end;
+        continue;
+      }
+      if (value[i] === "{") depth++;
+      else if (value[i] === "}") {
+        depth--;
+        if (depth < 0) return;
+      } else if (value[i] === "," && depth === 0) {
+        parts.push(value.slice(start2, i));
+        start2 = i + 1;
+        hasComma = true;
+      }
+    }
+    if (!hasComma || depth !== 0) return;
+    parts.push(value.slice(start2));
+    return parts;
+  };
+  const expand = (value) => {
+    let expanded = [""];
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] === "[") {
+        const end2 = classEnd(value, i);
+        if (end2 < 0) return;
+        const part = value.slice(i, end2 + 1);
+        expanded = expanded.map((prefix) => prefix + part);
+        i = end2;
+        continue;
+      }
+      if (value[i] === "}") return;
+      if (value[i] !== "{") {
+        expanded = expanded.map((prefix) => prefix + value[i]);
+        continue;
+      }
+      const end = braceEnd(value, i);
+      if (end < 0) return;
+      const alternatives = split(value.slice(i + 1, end));
+      if (!alternatives || alternatives.length < 2 || alternatives.length > MAX_WORKSPACE_BRACE_ALTERNATIVES || alternatives.some((part) => !part)) return;
+      const expandedAlternatives = [];
+      for (const alternative of alternatives) {
+        const items = expand(alternative);
+        if (!items || expandedAlternatives.length + items.length > MAX_WORKSPACE_BRACE_EXPANSIONS) return;
+        expandedAlternatives.push(...items);
+      }
+      if (expanded.length * expandedAlternatives.length > MAX_WORKSPACE_BRACE_EXPANSIONS) return;
+      const next = [];
+      for (const prefix of expanded) for (const alternative of expandedAlternatives) next.push(prefix + alternative);
+      expanded = next;
+      i = end;
+    }
+    return expanded;
+  };
+  return expand(pattern);
 }
 function jsImports(source, file) {
   const imports = [], warnings = [];
@@ -220509,7 +220632,7 @@ async function scan(snapshot, revision2, roots, deadline) {
     }
     const exclude = raw.startsWith("!"), pattern = raw.replace(/^!/, "").replace(/^\.\//, "").replace(/\/$/, "");
     const expanded = pattern.length <= MAX_WORKSPACE_PATTERN_LENGTH ? expandWorkspaceAlternatives(pattern) : void 0;
-    if (!expanded || expanded.some((value) => value.includes("[") || value.includes("]") || value.length > MAX_WORKSPACE_PATTERN_LENGTH || !safePath(value.replaceAll("*", "x").replaceAll("?", "x")))) {
+    if (!expanded || expanded.some((value) => value.length > MAX_WORKSPACE_PATTERN_LENGTH || !safePath(value.replaceAll("*", "x").replaceAll("?", "x")))) {
       warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Unsupported or oversized workspace pattern: " + raw);
       continue;
     }
@@ -220519,17 +220642,65 @@ async function scan(snapshot, revision2, roots, deadline) {
       break;
     }
     expandedWorkspacePatternCount += expanded.length;
+    const workspacePatternStart = workspacePatterns.length;
+    let invalidClassPattern = false;
     for (const expandedPattern of expanded) {
       const chars = Array.from(expandedPattern), tokens = [];
+      let unsupportedClass = false;
       for (let i = 0; i < chars.length; i++) {
         if (chars[i] === "*") {
           const crossesSlash = chars[i + 1] === "*";
-          tokens.push({ kind: "star", crossesSlash });
-          if (crossesSlash) i++;
+          if (crossesSlash && chars[i + 2] === "/") {
+            tokens.push({ kind: "globstar-directory" });
+            i += 2;
+          } else {
+            tokens.push({ kind: "star", crossesSlash });
+            if (crossesSlash) i++;
+          }
         } else if (chars[i] === "?") tokens.push({ kind: "one" });
-        else tokens.push({ kind: "literal", value: chars[i] });
+        else if (chars[i] === "[") {
+          const end = chars.indexOf("]", i + 1);
+          if (end < 0) {
+            unsupportedClass = true;
+            break;
+          }
+          let body2 = chars.slice(i + 1, end), negated = false;
+          if (body2[0] === "!" || body2[0] === "^") {
+            negated = true;
+            body2 = body2.slice(1);
+          }
+          if (!body2.length || body2.some((character) => character === "/" || character === "\\" || character === "[")) {
+            unsupportedClass = true;
+            break;
+          }
+          const ranges = [];
+          for (let j = 0; j < body2.length; j++) {
+            const first = body2[j].codePointAt(0);
+            if (j + 2 < body2.length && body2[j + 1] === "-" && body2[j + 2] !== "-") {
+              const last = body2[j + 2].codePointAt(0);
+              if (first > last) {
+                unsupportedClass = true;
+                break;
+              }
+              ranges.push([first, last]);
+              j += 2;
+            } else ranges.push([first, first]);
+          }
+          if (unsupportedClass) break;
+          tokens.push({ kind: "class", negated, ranges });
+          i = end;
+        } else tokens.push({ kind: "literal", value: chars[i] });
+      }
+      if (unsupportedClass) {
+        warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Malformed or unsupported workspace character class: " + raw);
+        invalidClassPattern = true;
+        break;
       }
       workspacePatterns.push({ exclude, tokens });
+    }
+    if (invalidClassPattern) {
+      workspacePatterns.length = workspacePatternStart;
+      continue;
     }
   }
   const includePatterns = workspacePatternLimitExceeded || workspaceExpansionLimitExceeded ? [] : workspacePatterns.filter((pattern) => !pattern.exclude), excludePatterns = workspacePatternLimitExceeded || workspaceExpansionLimitExceeded ? [] : workspacePatterns.filter((pattern) => pattern.exclude);
@@ -220549,7 +220720,7 @@ async function scan(snapshot, revision2, roots, deadline) {
           return;
         }
         const state = pending.pop(), token = pattern.tokens[state];
-        if (token?.kind === "star" && !closed.has(state + 1)) {
+        if ((token?.kind === "star" || token?.kind === "globstar-directory") && !closed.has(state + 1)) {
           closed.add(state + 1);
           pending.push(state + 1);
         }
@@ -220569,8 +220740,14 @@ async function scan(snapshot, revision2, roots, deadline) {
         if (!token) continue;
         if (token.kind === "star") {
           if (token.crossesSlash || character !== "/") next.add(state);
+        } else if (token.kind === "globstar-directory") {
+          next.add(state);
+          if (character === "/") next.add(state + 1);
         } else if (token.kind === "one") {
           if (character !== "/") next.add(state + 1);
+        } else if (token.kind === "class") {
+          const point = character.codePointAt(0), matched = token.ranges.some(([start2, end]) => point >= start2 && point <= end);
+          if (character !== "/" && (token.negated ? !matched : matched)) next.add(state + 1);
         } else if (token.value === character) next.add(state + 1);
       }
       if (next.size === 0) return false;

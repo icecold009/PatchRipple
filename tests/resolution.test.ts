@@ -136,6 +136,18 @@ test('pnpm workspace YAML simple include and exclude patterns resolve local pack
  assert.ok(result.warnings.some(w=>w.code==='EXPECTED_EXTERNAL_IMPORT'&&w.path==='api.ts'));
  assert.equal(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='pnpm-workspace.yaml'),false);
 });
+test('pnpm workspace YAML flow sequences resolve local packages',async()=>{
+ const result=await scanFiles({
+  'pnpm-workspace.yaml':"packages: ['packages/*', \"apps/*\"] # supported inline list\n",
+  'packages/ui/package.json':JSON.stringify({name:'@demo/ui',exports:{'.':'./src/index.js'}}),
+  'packages/ui/src/index.ts':'export const ui=1;',
+  'apps/web/package.json':JSON.stringify({name:'@demo/web',exports:{'.':'./src/index.js'}}),
+  'apps/web/src/index.ts':'export const web=1;',
+  'api.ts':"import '@demo/ui'; import '@demo/web';"
+ });
+ assert.deepEqual(result.edges.map(e=>e.to),['file:packages/ui/src/index.ts','file:apps/web/src/index.ts']);
+ assert.equal(result.warnings.length,0);
+});
 test('workspace brace alternatives resolve bounded package patterns',async()=>{
  const result=await scanFiles({'package.json':JSON.stringify({workspaces:['packages/{core,ui}/*']}),'packages/ui/widget/package.json':JSON.stringify({name:'@demo/widget',exports:{'.':'./src/index.js'}}),'packages/ui/widget/src/index.js':'export const widget=true;','api.ts':"import '@demo/widget';"});
  assert.deepEqual(result.edges.map(e=>e.to),['file:packages/ui/widget/src/index.js']);assert.equal(result.warnings.length,0);
@@ -153,18 +165,52 @@ test('workspace brace expansion over the aggregate cap skips resolution',async()
  const result=await scanFiles({'package.json':JSON.stringify({workspaces:[`packages/{${alternatives}}/{${alternatives}}`,'other/*']}),'packages/a/a/package.json':JSON.stringify({name:'@demo/widget'}),'other/pkg/package.json':JSON.stringify({name:'@demo/other'}),'api.ts':"import '@demo/widget';"});
  assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json'&&w.detail.includes('pattern expansion exceeds 256')));assert.equal(result.edges.length,0);
 });
-test('unsupported workspace character classes remain explicit',async()=>{
- const result=await scanFiles({'package.json':JSON.stringify({workspaces:['packages/[ab]/*']}),'packages/a/widget/package.json':JSON.stringify({name:'@demo/widget'}),'api.ts':"import '@demo/widget';"});
- assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json'&&w.detail.includes('Unsupported or oversized workspace pattern')));
+test('workspace character classes support ranges and negation',async()=>{
+ const result=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/[a-c]/*','packages/[!a]/*']}),
+  'packages/a/one/package.json':JSON.stringify({name:'@demo/one',exports:{'.':'./src/index.js'}}),
+  'packages/a/one/src/index.ts':'export const one=1;',
+  'packages/b/two/package.json':JSON.stringify({name:'@demo/two',exports:{'.':'./src/index.js'}}),
+  'packages/b/two/src/index.ts':'export const two=1;',
+  'packages/c/three/package.json':JSON.stringify({name:'@demo/three',exports:{'.':'./src/index.js'}}),
+  'packages/c/three/src/index.ts':'export const three=1;',
+  'api.ts':"import '@demo/one'; import '@demo/two'; import '@demo/three';"
+ });
+ assert.deepEqual(result.edges.map(e=>e.to),[
+  'file:packages/a/one/src/index.ts','file:packages/b/two/src/index.ts','file:packages/c/three/src/index.ts'
+ ]);
+ assert.equal(result.warnings.length,0);
 });
-test('nested and oversized workspace brace alternatives remain explicit',async()=>{
+test('malformed workspace character classes never produce guessed matches',async()=>{
+ const result=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/[a-z/*','apps/[z-a]/*']}),
+  'packages/a/widget/package.json':JSON.stringify({name:'@demo/package-widget'}),
+  'apps/z/widget/package.json':JSON.stringify({name:'@demo/app-widget'}),
+  'api.ts':"import '@demo/package-widget'; import '@demo/app-widget';"
+ });
+ assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json'));
+ assert.equal(result.edges.length,0);
+});
+test('nested workspace braces resolve and oversized alternatives remain explicit',async()=>{
  const alternatives=Array.from({length:17},(_,index)=>String.fromCharCode(97+index)).join(',');
- const result=await scanFiles({'package.json':JSON.stringify({workspaces:['packages/{core,{ui,docs}}/*',`packages/{${alternatives}}/*`]})});
- assert.equal(result.warnings.filter(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json').length,2);
+ const result=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/{core,{ui,docs}}/*',`other/{${alternatives}}/*`]}),
+  'packages/core/lib/package.json':JSON.stringify({name:'@demo/core',exports:{'.':'./src/index.js'}}),
+  'packages/core/lib/src/index.ts':'export const core=1;',
+  'packages/ui/widget/package.json':JSON.stringify({name:'@demo/ui',exports:{'.':'./src/index.js'}}),
+  'packages/ui/widget/src/index.ts':'export const ui=1;',
+  'packages/docs/site/package.json':JSON.stringify({name:'@demo/docs',exports:{'.':'./src/index.js'}}),
+  'packages/docs/site/src/index.ts':'export const docs=1;',
+  'api.ts':"import '@demo/core'; import '@demo/ui'; import '@demo/docs';"
+ });
+ assert.deepEqual(result.edges.map(e=>e.to),[
+  'file:packages/core/lib/src/index.ts','file:packages/ui/widget/src/index.ts','file:packages/docs/site/src/index.ts'
+ ]);
+ assert.equal(result.warnings.filter(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json').length,1);
 });
 test('unsupported pnpm workspace YAML stays visibly incomplete instead of guessing',async()=>{
  const result=await scanFiles({
-  'pnpm-workspace.yaml':'packages: [packages/*]\n',
+  'pnpm-workspace.yaml':'packages: [packages/*, [apps/*]]\n',
   'packages/ui/package.json':JSON.stringify({name:'@demo/ui'}),
   'api.ts':"import '@demo/ui';"
  });
@@ -204,6 +250,16 @@ test('workspace glob matcher preserves recursive directory patterns',async()=>{
  });
  assert.ok(result.edges.some(e=>e.to==='file:packages/group/lib/src/index.ts'));
  assert.equal(result.warnings.length,0);
+ const zeroDirectories=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/**/lib']}),
+  'packages/lib/package.json':JSON.stringify({name:'@demo/root-lib',exports:{'.':'./src/index.js'}}),
+  'packages/lib/src/index.ts':'export const root=1;',
+  'packages/group/lib/package.json':JSON.stringify({name:'@demo/nested-lib',exports:{'.':'./src/index.js'}}),
+  'packages/group/lib/src/index.ts':'export const nested=1;',
+  'api.ts':"import '@demo/root-lib'; import '@demo/nested-lib';"
+ });
+ assert.deepEqual(zeroDirectories.edges.map(e=>e.to),['file:packages/lib/src/index.ts','file:packages/group/lib/src/index.ts']);
+ assert.equal(zeroDirectories.warnings.length,0);
 });
 test('deep workspace export conditions are bounded and reported',async()=>{
  let target:unknown='./src/index.js';

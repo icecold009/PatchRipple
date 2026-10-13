@@ -87,6 +87,19 @@ test('local package entry metadata resolves main before considering index files'
  const result=await scanFiles({'api.ts':"import './library';",'library/package.json':'{"main":"other.js"}','library/index.ts':'export const wrong=1;','library/other.ts':'export const right=1;'});
  assert.deepEqual(result.edges.map(e=>e.to),['file:library/other.ts']);assert.equal(result.warnings.length,0);
 });
+test('relative directory imports resolving to repository root use its package entry',async()=>{
+ const result=await scanFiles({
+  'package.json':JSON.stringify({main:'./src/index.js'}),
+  'src/index.js':'module.exports = {};',
+  'examples/app/index.js':"const app = require('../../');",
+  'test/unit/app.js':"const app = require('../../');",
+  'test/app.js':"const app = require('../');"
+ });
+ const expected=['examples/app/index.js','test/app.js','test/unit/app.js'].map(from=>[`file:${from}`,'file:src/index.js']).sort();
+ assert.deepEqual(result.edges.map(e=>[e.from,e.to]).sort(),expected);assert.equal(result.warnings.length,0);
+ const fallback=await scanFiles({'index.js':'module.exports = {};','nested/app.js':"const app = require('../');"});
+ assert.deepEqual(fallback.edges.map(e=>[e.from,e.to]),[['file:nested/app.js','file:index.js']]);assert.equal(fallback.warnings.length,0);
+});
 test('expected external imports remain visible without making local analysis incomplete',async()=>{
  const f=fixture({'src/api.ts':"import React from 'react'; export const view=React;"});
  try{const base=git(f.repo,'rev-parse','HEAD');f.write({'src/api.ts':"import React from 'react'; import './missing'; export const view=React+1;"});const head=f.commit('external and unresolved imports');

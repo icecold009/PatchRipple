@@ -220426,21 +220426,21 @@ async function pythonImports(source) {
   }
 }
 function candidates(base, from, kind) {
-  const extension = import_node_path.default.posix.extname(base), stem = base.slice(0, -extension.length);
+  const normalizedPath = import_node_path.default.posix.normalize(base).replace(/\/+$/, ""), normalizedBase = normalizedPath === "." ? "" : normalizedPath, extension = import_node_path.default.posix.extname(normalizedBase), stem = normalizedBase.slice(0, -extension.length), indexBase = normalizedBase ? normalizedBase + "/index" : "index";
   const substitutions = { ".js": [".ts", ".tsx", ".d.ts", ".js"], ".jsx": [".tsx", ".d.ts", ".jsx"], ".mjs": [".mts", ".d.mts", ".mjs"], ".cjs": [".cts", ".d.cts", ".cjs"] };
   const declarationFile = (value) => /(?:\.d|\.test-d)\.(?:ts|mts|cts)$/.test(value), javascriptImporter = /\.(?:js|jsx|mjs|cjs)$/.test(from);
   if (substitutions[extension]) {
     const mapped = substitutions[extension].map((x) => stem + x);
     if (declarationFile(from)) return [...mapped.filter(declarationFile), ...mapped.filter((x) => !declarationFile(x))];
     if (kind === "type-only") return mapped;
-    if (javascriptImporter) return [base, ...mapped.filter((x) => x !== base && !declarationFile(x))];
+    if (javascriptImporter) return [normalizedBase, ...mapped.filter((x) => x !== normalizedBase && !declarationFile(x))];
     return mapped.filter((x) => !declarationFile(x));
   }
-  if (extension) return [base];
-  if (kind === "type-only") return [base, ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => base + x), ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => base + "/index" + x)];
-  if (declarationFile(from)) return [base, ...[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".js", ".jsx"].map((x) => base + x), ...[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".js", ".jsx"].map((x) => base + "/index" + x)];
-  if (javascriptImporter) return [base, ...[".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"].map((x) => base + x), ...[".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"].map((x) => base + "/index" + x)];
-  return [base, ...[".ts", ".tsx", ".js", ".jsx"].map((x) => base + x), ...[".ts", ".tsx", ".js", ".jsx"].map((x) => base + "/index" + x)];
+  if (extension) return [normalizedBase];
+  if (kind === "type-only") return [normalizedBase, ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => normalizedBase + x), ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => indexBase + x)];
+  if (declarationFile(from)) return [normalizedBase, ...[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".js", ".jsx"].map((x) => normalizedBase + x), ...[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".js", ".jsx"].map((x) => indexBase + x)];
+  if (javascriptImporter) return [normalizedBase, ...[".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"].map((x) => normalizedBase + x), ...[".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"].map((x) => indexBase + x)];
+  return [normalizedBase, ...[".ts", ".tsx", ".js", ".jsx"].map((x) => normalizedBase + x), ...[".ts", ".tsx", ".js", ".jsx"].map((x) => indexBase + x)];
 }
 async function scan(snapshot, revision2, roots, deadline) {
   const edges = [], warnings = [...snapshot.warnings];
@@ -220795,8 +220795,11 @@ async function scan(snapshot, revision2, roots, deadline) {
       }
       if (config.baseUrl !== void 0) bases.push(import_node_path.default.posix.join(config.baseUrl, spec));
     }
-    for (const b of bases) {
-      if (!safePath(b) && b !== ".") continue;
+    for (const base of bases) {
+      const normalized = import_node_path.default.posix.normalize(base);
+      if (normalized.startsWith("/")) continue;
+      const trimmed = normalized.replace(/\/+$/, ""), b = trimmed === "." ? "" : trimmed;
+      if (b && !safePath(b)) continue;
       if (packageDirs.has(b)) {
         const result = resolveDirectoryPackage(from, b, kind);
         if (result) return result;

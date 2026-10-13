@@ -26,14 +26,14 @@ The animated preview above and the [clickable walkthrough](docs/demo/walkthrough
 
 ## Quick start
 
-Use Node.js 24 or newer and npm. This evidence snapshot has no GitHub release or version tag. To install the verified open PR #7 candidate from an immutable source archive, without cloning Git:
+Use Node.js 24 or newer and npm. This snapshot has no versioned GitHub release or tag, and the public npm registry has no `patchripple` package. To install the verified open PR #7 candidate from an immutable source archive, without cloning Git:
 
 ~~~sh
-npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/23d73a9af77f9f758274ee4db82695bb7cfe6bc5.tar.gz"
+npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/a6be403338c28e27b081a8839f6f85ac6836ac89.tar.gz"
 patchripple --version
 ~~~
 
-The pinned code-bearing commit passed hosted CI and Static PR impact checks. PR #7 remains an open draft; this candidate is not merged or a versioned release. The merged `main` pin is `4b45616e941ebe349b845a62a8941c586fbb18c5`. Review [release evidence](docs/RELEASE_EVIDENCE.md) before choosing a source revision.
+The pinned code-bearing commit passed local lint, typecheck, all 59 tests, build, package smoke, generated-file consistency, and hosted [Trusted CI #70](https://github.com/icecold009/PatchRipple/actions/runs/38427654921) and [Static PR impact #26](https://github.com/icecold009/PatchRipple/actions/runs/38427655088). CI #70 includes generated browser fixtures and Chromium, Firefox, and WebKit checks. PR #7 remains an open draft; this candidate is not merged or a versioned release. The merged `main` pin is `4b45616e941ebe349b845a62a8941c586fbb18c5`. Review [release evidence](docs/RELEASE_EVIDENCE.md) before choosing a source revision.
 
 For a public GitHub PR whose exact commits are missing from the target clone, fetch the base branch and PR head into PatchRipple-owned refs:
 

@@ -9,6 +9,7 @@ const js=/\.[cm]?[jt]sx?$/;
 const MAX_WORKSPACE_PATTERNS=256;
 const MAX_WORKSPACE_PATTERN_LENGTH=512;
 const MAX_WORKSPACE_BRACE_ALTERNATIVES=16;
+const MAX_WORKSPACE_BRACE_EXPANSIONS=256;
 const MAX_WORKSPACE_PATH_LENGTH=4096;
 const MAX_WORKSPACE_GLOB_WORK=2_000_000;
 const MAX_EXPORTS_CONDITION_DEPTH=64;
@@ -59,13 +60,22 @@ function pnpmWorkspacePatterns(text:string):{patterns:string[];error?:string} {
  return {patterns};
 }
 function expandWorkspaceAlternatives(pattern:string):string[]|undefined {
- const opens=(pattern.match(/{/g)??[]).length,closes=(pattern.match(/}/g)??[]).length;
- if(opens===0&&closes===0)return [pattern];
- if(opens!==1||closes!==1)return;
- const start=pattern.indexOf('{'),end=pattern.indexOf('}');if(end<start)return;
- const alternatives=pattern.slice(start+1,end).split(',');
- if(alternatives.length<2||alternatives.length>MAX_WORKSPACE_BRACE_ALTERNATIVES||alternatives.some(value=>!value))return;
- return alternatives.map(value=>pattern.slice(0,start)+value+pattern.slice(end+1));
+ const expanded=[''];let cursor=0;
+ while(cursor<pattern.length){
+  const start=pattern.indexOf('{',cursor),unexpectedClose=pattern.indexOf('}',cursor);
+  if(unexpectedClose!==-1&&(start===-1||unexpectedClose<start))return;
+  if(start===-1)break;
+  const end=pattern.indexOf('}',start+1),nested=pattern.indexOf('{',start+1);
+  if(end===-1||nested!==-1&&nested<end)return;
+  const alternatives=pattern.slice(start+1,end).split(',');
+  if(alternatives.length<2||alternatives.length>MAX_WORKSPACE_BRACE_ALTERNATIVES||alternatives.some(value=>!value))return;
+  if(expanded.length*alternatives.length>MAX_WORKSPACE_BRACE_EXPANSIONS)return;
+  const prefix=pattern.slice(cursor,start),next:string[]=[];
+  for(const existing of expanded)for(const alternative of alternatives)next.push(existing+prefix+alternative);
+  expanded.splice(0,expanded.length,...next);cursor=end+1;
+ }
+ if(pattern.indexOf('}',cursor)!==-1)return;
+ const suffix=pattern.slice(cursor);return expanded.map(value=>value+suffix);
 }
 export interface Scan {edges:Edge[];warnings:Warning[]}
 interface Import {name:string;kind:Kind;members?:string[]}
@@ -166,6 +176,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
  type WorkspacePattern={exclude:boolean;tokens:({kind:'literal';value:string}|{kind:'one'}|{kind:'star';crossesSlash:boolean})[]};
  const workspacePatterns:WorkspacePattern[]=[];
  const workspacePatternLimitExceeded=workspacesRaw.length>MAX_WORKSPACE_PATTERNS;
+ let expandedWorkspacePatternCount=0,workspaceExpansionLimitExceeded=false;
  if(workspacePatternLimitExceeded)warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Workspace pattern count exceeds 256; workspace resolution was skipped');
  if(!workspacePatternLimitExceeded)for(const raw of workspacesRaw){
   if(typeof raw!=='string'){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported workspace pattern: '+String(raw));continue;}
@@ -174,6 +185,8 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
    if(!expanded||expanded.some(value=>value.includes('[')||value.includes(']')||value.length>MAX_WORKSPACE_PATTERN_LENGTH||!safePath(value.replaceAll('*','x').replaceAll('?','x')))){
     warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported or oversized workspace pattern: '+raw);continue;
    }
+   if(expandedWorkspacePatternCount+expanded.length>MAX_WORKSPACE_PATTERNS){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Workspace pattern expansion exceeds 256; workspace resolution was skipped');workspaceExpansionLimitExceeded=true;break;}
+   expandedWorkspacePatternCount+=expanded.length;
    for(const expandedPattern of expanded){
     const chars=Array.from(expandedPattern),tokens:WorkspacePattern['tokens']=[];
     for(let i=0;i<chars.length;i++){
@@ -184,7 +197,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
     workspacePatterns.push({exclude,tokens});
   }
  }
- const includePatterns=workspacePatterns.filter(pattern=>!pattern.exclude),excludePatterns=workspacePatterns.filter(pattern=>pattern.exclude);
+ const includePatterns=workspacePatternLimitExceeded||workspaceExpansionLimitExceeded?[]:workspacePatterns.filter(pattern=>!pattern.exclude),excludePatterns=workspacePatternLimitExceeded||workspaceExpansionLimitExceeded?[]:workspacePatterns.filter(pattern=>pattern.exclude);
  const workspaces=new Map<string,{dir:string;manifest:Record<string,unknown>}>();
  const ambiguousWorkspaces=new Set<string>();
  let workspaceGlobWork=0,workspaceGlobLimitExceeded=false;

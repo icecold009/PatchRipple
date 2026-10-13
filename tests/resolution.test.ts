@@ -115,6 +115,19 @@ test('workspace brace alternatives resolve bounded package patterns',async()=>{
  const result=await scanFiles({'package.json':JSON.stringify({workspaces:['packages/{core,ui}/*']}),'packages/ui/widget/package.json':JSON.stringify({name:'@demo/widget',exports:{'.':'./src/index.js'}}),'packages/ui/widget/src/index.js':'export const widget=true;','api.ts':"import '@demo/widget';"});
  assert.deepEqual(result.edges.map(e=>e.to),['file:packages/ui/widget/src/index.js']);assert.equal(result.warnings.length,0);
 });
+test('multiple workspace brace groups expand as a bounded product',async()=>{
+ const result=await scanFiles({'package.json':JSON.stringify({workspaces:['packages/{core,ui}/{client,server}']}),'packages/ui/server/package.json':JSON.stringify({name:'@demo/widget',exports:{'.':'./src/index.js'}}),'packages/ui/server/src/index.js':'export const widget=true;','api.ts':"import '@demo/widget';"});
+ assert.deepEqual(result.edges.map(e=>e.to),['file:packages/ui/server/src/index.js']);assert.equal(result.warnings.length,0);
+});
+test('workspace brace expansion over the aggregate cap skips resolution',async()=>{
+ const alternatives=Array.from({length:16},(_,index)=>String.fromCharCode(97+index)).join(',');
+ const oversized=await scanFiles({'package.json':JSON.stringify({workspaces:[`packages/{${alternatives}}/{${alternatives}}/{${alternatives}}`]}),'packages/a/a/a/package.json':JSON.stringify({name:'@demo/oversized'}),'api.ts':"import '@demo/oversized';"});
+ assert.ok(oversized.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json'));assert.equal(oversized.edges.length,0);
+ const exactlyAtCap=await scanFiles({'package.json':JSON.stringify({workspaces:[`packages/{${alternatives}}/{${alternatives}}`]}),'packages/a/a/package.json':JSON.stringify({name:'@demo/widget',exports:{'.':'./src/index.ts'}}),'packages/a/a/src/index.ts':'export const widget=true;','api.ts':"import '@demo/widget';"});
+ assert.deepEqual(exactlyAtCap.edges.map(e=>e.to),['file:packages/a/a/src/index.ts']);assert.equal(exactlyAtCap.warnings.length,0);
+ const result=await scanFiles({'package.json':JSON.stringify({workspaces:[`packages/{${alternatives}}/{${alternatives}}`,'other/*']}),'packages/a/a/package.json':JSON.stringify({name:'@demo/widget'}),'other/pkg/package.json':JSON.stringify({name:'@demo/other'}),'api.ts':"import '@demo/widget';"});
+ assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json'&&w.detail.includes('pattern expansion exceeds 256')));assert.equal(result.edges.length,0);
+});
 test('unsupported workspace character classes remain explicit',async()=>{
  const result=await scanFiles({'package.json':JSON.stringify({workspaces:['packages/[ab]/*']}),'packages/a/widget/package.json':JSON.stringify({name:'@demo/widget'}),'api.ts':"import '@demo/widget';"});
  assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='package.json'&&w.detail.includes('Unsupported or oversized workspace pattern')));

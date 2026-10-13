@@ -1,6 +1,6 @@
 # PatchRipple: remaining validation work
 
-**Status snapshot: 2026-10-13.** Public `main` is `4b45616e941ebe349b845a62a8941c586fbb18c5`. PR #4 and PR #6 are merged. PR #6's exact head `a19393fb0580bc8ba0e9c2c4c7d1e9519717eedb` passed Trusted PatchRipple CI run #38 and Static PR impact run #11. Draft PR #7 is open; its code-bearing commit `9a7b64949dea404780e19101196fe0f723a66128` passed Trusted PatchRipple CI run #44 and Static PR impact run #13. PR #7 is not merged or released. See [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) for evidence boundaries.
+**Status snapshot: 2026-10-13.** Public `main` is `4b45616e941ebe349b845a62a8941c586fbb18c5`. PR #4 and PR #6 are merged. PR #6's exact head `a19393fb0580bc8ba0e9c2c4c7d1e9519717eedb` passed Trusted PatchRipple CI run #38 and Static PR impact run #11. Draft PR #7 is open; its last pushed head `4785e1577c281927514221dadd4e0de77ee7a040` passed Trusted PatchRipple CI run #46 and Static PR impact run #14. The branch now has an unpushed resolver fix for a real-PR accuracy issue; local verification passed 51 tests, package smoke, and generated-file consistency, but hosted checks for that fix are pending. PR #7 is not merged or released. See [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) for evidence boundaries.
 
 ## Use the current pinned source
 
@@ -31,9 +31,9 @@ The hosted browser suite and keyboard checks do not establish screen-reader comp
 
 ## Resolve remaining compatibility evidence
 
-The current code supports `package.json` workspace arrays/objects, package export maps, and relative in-repository `tsconfig` inheritance. Draft PR #7 adds simple top-level `packages:` lists from `pnpm-workspace.yaml`; local verification passed (48/48 tests), and exact-head hosted CI #44 plus impact run #13 succeeded. This support is implemented on the open PR branch but is not released. Complex YAML/globs, external TypeScript config inheritance, and project-reference build semantics remain unsupported.
+The current code supports `package.json` workspace arrays/objects, package export maps, and relative in-repository `tsconfig` inheritance. Draft PR #7 adds simple top-level `packages:` lists from `pnpm-workspace.yaml`; the last pushed head passed hosted CI #46 and impact run #14. The current local branch passes 51 tests, package smoke, and generated-file consistency, including three resolver regression cases; those changes are not yet on the hosted PR head. This support is implemented on the open PR branch but is not released. Complex YAML, advanced glob patterns, external TypeScript config inheritance, and project-reference build semantics remain unsupported.
 
-The PR #6 self-hosted check is a single bounded sample: 7 changed files, 17 candidates, 14 revision-attributed edges, and an incomplete result due to binary and source-size warnings. Independently compare another real repository/PR against maintainer-checked expected relationships before making an accuracy claim.
+The PR #6 self-hosted check is a bounded sample: 7 changed files, 17 candidates, 14 revision-attributed edges, and an incomplete result due to binary and source-size warnings. A second bounded check used merged public PR [sindresorhus/p-limit#109](https://github.com/sindresorhus/p-limit/pull/109). Manual source/patch review caught a false runtime-to-declaration edge that the old resolver reported as complete. The fix and regression cases now produce the expected runtime and declaration edges for this PR; see [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md). This developer-run sample improves evidence but does not substitute for several independently scored real-repository trials with maintainers.
 
 ## Versioned publication
 

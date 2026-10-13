@@ -28,6 +28,18 @@ test('emitted JS/JSX and declaration imports map to their supported source exten
  const result=await scanFiles({'api.ts':"import './component.js'; import './view.jsx'; import type {X} from './types.mjs';",'component.tsx':'export const component=1;','view.tsx':'export const view=1;','types.d.mts':'export interface X {}'});
  assert.equal(result.warnings.length,0);assert.deepEqual(result.edges.map(e=>e.to),['file:component.tsx','file:view.tsx','file:types.d.mts']);
 });
+test('JavaScript runtime imports resolve implementations instead of declaration sidecars',async()=>{
+ const result=await scanFiles({'index.ts':'export const value=1;','index.js':'export const value=1;','index.d.ts':'export declare const value:number;','consumer.js':"import {value} from './index.js';"});
+ assert.deepEqual(result.edges.map(e=>[e.kind,e.to]),[['static','file:index.js']]);assert.equal(result.warnings.length,0);
+});
+test('TypeScript emitted JS imports prefer source while type-only imports use declarations',async()=>{
+ const result=await scanFiles({'api.ts':"import './source.js'; import type {Value} from './types.js';",'source.ts':'export const value=1;','source.js':'export const value=1;','types.js':'export const value=1;','types.d.ts':'export interface Value {}'});
+ assert.deepEqual(result.edges.map(e=>[e.kind,e.to]),[['static','file:source.ts'],['type-only','file:types.d.ts']]);assert.equal(result.warnings.length,0);
+});
+test('TypeScript declaration-test importers resolve declaration sidecars before runtime files',async()=>{
+ const result=await scanFiles({'index.js':'export const value=1;','index.d.ts':'export declare const value:number;','consumer.test-d.ts':"import {expectType} from 'tsd'; import value from './index.js';"});
+ assert.deepEqual(result.edges.map(e=>e.to),['file:index.d.ts']);
+});
 test('tsconfig aliases use exact match and longest wildcard prefix, not rule insertion order',async()=>{
  const result=await scanFiles({'tsconfig.json':JSON.stringify({compilerOptions:{paths:{'*':['broad/*'],'@/*':['generic/*'],'@/specific/*':['specific/*'],'@/exact':['exact.ts']}}}),'api.ts':"import '@/specific/core'; import '@/exact';",'generic/specific/core.ts':'export const wrong=1;','specific/core.ts':'export const right=1;','generic/exact.ts':'export const wrong=1;','exact.ts':'export const right=1;'});
  assert.equal(result.warnings.length,0);assert.deepEqual(result.edges.map(e=>e.to),['file:specific/core.ts','file:exact.ts']);

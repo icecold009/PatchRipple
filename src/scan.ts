@@ -113,13 +113,22 @@ export async function pythonImports(source:string):Promise<{imports:Import[];war
   }visit(tree.rootNode);return {imports,warnings};
  } finally {tree?.delete();parser.delete();}
 }
-function candidates(base:string):string[] {
- // Emitted JS paths refer to corresponding TS/TSX/declaration source candidates.
+function candidates(base:string,from:string,kind:Kind):string[] {
  const extension=path.posix.extname(base),stem=base.slice(0,-extension.length);
  const substitutions:Record<string,string[]>={'.js':['.ts','.tsx','.d.ts','.js'],'.jsx':['.tsx','.d.ts','.jsx'],'.mjs':['.mts','.d.mts','.mjs'],'.cjs':['.cts','.d.cts','.cjs']};
- if(substitutions[extension])return substitutions[extension].map(x=>stem+x);
+ const declarationFile=(value:string)=>/(?:\.d|\.test-d)\.(?:ts|mts|cts)$/.test(value),javascriptImporter=/\.(?:js|jsx|mjs|cjs)$/.test(from);
+ if(substitutions[extension]){
+  const mapped=substitutions[extension].map(x=>stem+x);
+  if(declarationFile(from))return [...mapped.filter(declarationFile),...mapped.filter(x=>!declarationFile(x))];
+  if(kind==='type-only')return mapped;
+  if(javascriptImporter)return [base,...mapped.filter(x=>x!==base&&!declarationFile(x))];
+  return mapped.filter(x=>!declarationFile(x));
+ }
  if(extension)return [base];
- return [base,...['.ts','.tsx','.d.ts','.js','.jsx'].map(x=>base+x),...['.ts','.tsx','.d.ts','.js','.jsx'].map(x=>base+'/index'+x)];
+ if(kind==='type-only')return [base,...['.ts','.tsx','.d.ts','.js','.jsx'].map(x=>base+x),...['.ts','.tsx','.d.ts','.js','.jsx'].map(x=>base+'/index'+x)];
+ if(declarationFile(from))return [base,...['.d.ts','.d.mts','.d.cts','.ts','.tsx','.js','.jsx'].map(x=>base+x),...['.d.ts','.d.mts','.d.cts','.ts','.tsx','.js','.jsx'].map(x=>base+'/index'+x)];
+ if(javascriptImporter)return [base,...['.js','.jsx','.mjs','.cjs','.ts','.tsx','.mts','.cts'].map(x=>base+x),...['.js','.jsx','.mjs','.cjs','.ts','.tsx','.mts','.cts'].map(x=>base+'/index'+x)];
+ return [base,...['.ts','.tsx','.js','.jsx'].map(x=>base+x),...['.ts','.tsx','.js','.jsx'].map(x=>base+'/index'+x)];
 }
 export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],deadline:number):Promise<Scan>{
  const edges:Edge[]=[],warnings=[...snapshot.warnings];const edgeSet=new Set<string>();
@@ -297,20 +306,20 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   if(!target||!target.startsWith('./')||target.includes('\\'))return;
   const relative=path.posix.normalize(path.posix.join(dir,target.slice(2)));return safePath(relative)?relative:undefined;
  };
- const resolvePackagePath=(dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind):string|undefined=>{
+ const resolvePackagePath=(from:string,dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind):string|undefined=>{
   const target=resolveManifestTarget(dir,manifest,subpath,kind);if(!target)return;
-  for(const candidate of candidates(target))if(snapshot.files.has(candidate))return candidate;
+  for(const candidate of candidates(target,from,kind))if(snapshot.files.has(candidate))return candidate;
  };
  const packageNameAndSubpath=(spec:string):{name:string;subpath:string}=>{
   const parts=spec.split('/');const count=spec.startsWith('@')?2:1;return {name:parts.slice(0,count).join('/'),subpath:parts.slice(count).join('/')};
  };
  const resolveWorkspace=(from:string,spec:string,kind:Kind):string|undefined=>{
   const {name,subpath}=packageNameAndSubpath(spec);if(ambiguousWorkspaces.has(name)){warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Duplicate workspace package name is ambiguous: '+name);return;}const pkg=workspaces.get(name);if(!pkg)return;
-  const result=resolvePackagePath(pkg.dir,pkg.manifest,subpath,kind);if(!result)warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Workspace import has no unambiguous supported '+kind+' target in its package export map: '+spec);return result;
+  const result=resolvePackagePath(from,pkg.dir,pkg.manifest,subpath,kind);if(!result)warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Workspace import has no unambiguous supported '+kind+' target in its package export map: '+spec);return result;
  };
  const resolveDirectoryPackage=(from:string,dir:string,kind:Kind):string|undefined=>{
   const manifest=packageDirs.get(dir);if(!manifest)return;
-  const result=resolvePackagePath(dir,manifest,'',kind);if(!result)warn('CONFIG_UNSUPPORTED',from,'Package entry has no unambiguous supported '+kind+' target in '+dir+'/package.json');return result;
+  const result=resolvePackagePath(from,dir,manifest,'',kind);if(!result)warn('CONFIG_UNSUPPORTED',from,'Package entry has no unambiguous supported '+kind+' target in '+dir+'/package.json');return result;
  };
  const resolveJS=(from:string,spec:string,kind:Kind):string|undefined=>{
   if(spec.includes('\\')||spec.includes('\0')){warn('UNRESOLVED_IMPORT',from,'Unsafe import path');return;}
@@ -323,7 +332,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
    const rule=matches[0];if(rule){local=true;alias=true;const [prefix,suffix]=rule.pattern.split('*');const middle=suffix===undefined?'':spec.slice(prefix.length,spec.length-suffix.length);for(const target of rule.values)bases.push(target.replace('*',middle));}
    if(config.baseUrl!==undefined)bases.push(path.posix.join(config.baseUrl,spec));
   }
-  for(const b of bases){if(!safePath(b)&&b!=='.')continue;if(packageDirs.has(b)){const result=resolveDirectoryPackage(from,b,kind);if(result)return result;continue;}for(const c of candidates(b))if(snapshot.files.has(c))return c;}
+  for(const b of bases){if(!safePath(b)&&b!=='.')continue;if(packageDirs.has(b)){const result=resolveDirectoryPackage(from,b,kind);if(result)return result;continue;}for(const c of candidates(b,from,kind))if(snapshot.files.has(c))return c;}
   const workspaceName=packageNameAndSubpath(spec).name,knownWorkspace=workspaces.has(workspaceName);
   if(!local){const workspace=resolveWorkspace(from,spec,kind);if(workspace)return workspace;if(knownWorkspace)return;}
   if(local||alias)warn('UNRESOLVED_IMPORT',from,'Cannot resolve local import '+spec);

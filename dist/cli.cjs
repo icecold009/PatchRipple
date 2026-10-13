@@ -220391,12 +220391,22 @@ async function pythonImports(source) {
     parser.delete();
   }
 }
-function candidates(base) {
+function candidates(base, from, kind) {
   const extension = import_node_path.default.posix.extname(base), stem = base.slice(0, -extension.length);
   const substitutions = { ".js": [".ts", ".tsx", ".d.ts", ".js"], ".jsx": [".tsx", ".d.ts", ".jsx"], ".mjs": [".mts", ".d.mts", ".mjs"], ".cjs": [".cts", ".d.cts", ".cjs"] };
-  if (substitutions[extension]) return substitutions[extension].map((x) => stem + x);
+  const declarationFile = (value) => /(?:\.d|\.test-d)\.(?:ts|mts|cts)$/.test(value), javascriptImporter = /\.(?:js|jsx|mjs|cjs)$/.test(from);
+  if (substitutions[extension]) {
+    const mapped = substitutions[extension].map((x) => stem + x);
+    if (declarationFile(from)) return [...mapped.filter(declarationFile), ...mapped.filter((x) => !declarationFile(x))];
+    if (kind === "type-only") return mapped;
+    if (javascriptImporter) return [base, ...mapped.filter((x) => x !== base && !declarationFile(x))];
+    return mapped.filter((x) => !declarationFile(x));
+  }
   if (extension) return [base];
-  return [base, ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => base + x), ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => base + "/index" + x)];
+  if (kind === "type-only") return [base, ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => base + x), ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => base + "/index" + x)];
+  if (declarationFile(from)) return [base, ...[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".js", ".jsx"].map((x) => base + x), ...[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".js", ".jsx"].map((x) => base + "/index" + x)];
+  if (javascriptImporter) return [base, ...[".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"].map((x) => base + x), ...[".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"].map((x) => base + "/index" + x)];
+  return [base, ...[".ts", ".tsx", ".js", ".jsx"].map((x) => base + x), ...[".ts", ".tsx", ".js", ".jsx"].map((x) => base + "/index" + x)];
 }
 async function scan(snapshot, revision2, roots, deadline) {
   const edges = [], warnings = [...snapshot.warnings];
@@ -220684,10 +220694,10 @@ async function scan(snapshot, revision2, roots, deadline) {
     const relative = import_node_path.default.posix.normalize(import_node_path.default.posix.join(dir, target.slice(2)));
     return safePath(relative) ? relative : void 0;
   };
-  const resolvePackagePath = (dir, manifest, subpath, kind) => {
+  const resolvePackagePath = (from, dir, manifest, subpath, kind) => {
     const target = resolveManifestTarget(dir, manifest, subpath, kind);
     if (!target) return;
-    for (const candidate of candidates(target)) if (snapshot.files.has(candidate)) return candidate;
+    for (const candidate of candidates(target, from, kind)) if (snapshot.files.has(candidate)) return candidate;
   };
   const packageNameAndSubpath = (spec) => {
     const parts = spec.split("/");
@@ -220702,14 +220712,14 @@ async function scan(snapshot, revision2, roots, deadline) {
     }
     const pkg = workspaces.get(name);
     if (!pkg) return;
-    const result = resolvePackagePath(pkg.dir, pkg.manifest, subpath, kind);
+    const result = resolvePackagePath(from, pkg.dir, pkg.manifest, subpath, kind);
     if (!result) warn("UNRESOLVED_WORKSPACE_IMPORT", from, "Workspace import has no unambiguous supported " + kind + " target in its package export map: " + spec);
     return result;
   };
   const resolveDirectoryPackage = (from, dir, kind) => {
     const manifest = packageDirs.get(dir);
     if (!manifest) return;
-    const result = resolvePackagePath(dir, manifest, "", kind);
+    const result = resolvePackagePath(from, dir, manifest, "", kind);
     if (!result) warn("CONFIG_UNSUPPORTED", from, "Package entry has no unambiguous supported " + kind + " target in " + dir + "/package.json");
     return result;
   };
@@ -220747,7 +220757,7 @@ async function scan(snapshot, revision2, roots, deadline) {
         if (result) return result;
         continue;
       }
-      for (const c of candidates(b)) if (snapshot.files.has(c)) return c;
+      for (const c of candidates(b, from, kind)) if (snapshot.files.has(c)) return c;
     }
     const workspaceName = packageNameAndSubpath(spec).name, knownWorkspace = workspaces.has(workspaceName);
     if (!local) {

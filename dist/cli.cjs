@@ -220573,6 +220573,7 @@ async function scan(snapshot, revision2, roots, deadline) {
     if (!parsed || parsed.error || !parsed.config || typeof parsed.config !== "object") warn("CONFIG_UNSUPPORTED", file, "Invalid TypeScript config JSON");
     else {
       const config = parsed.config;
+      if (config.references !== void 0 && (!Array.isArray(config.references) || config.references.length > 0)) warn("CONFIG_UNSUPPORTED", file, "TypeScript project references are not modeled; analysis follows source imports only");
       const parentPaths = typeof config.extends === "string" ? [config.extends] : Array.isArray(config.extends) ? config.extends.filter((v) => typeof v === "string") : [];
       if (config.extends !== void 0 && (!Array.isArray(config.extends) && typeof config.extends !== "string" || Array.isArray(config.extends) && parentPaths.length !== config.extends.length)) warn("CONFIG_UNSUPPORTED", file, "Unsupported TypeScript extends value");
       for (const parent of parentPaths) {

@@ -59,6 +59,10 @@ test('CLI ceiling violations and empty required values are usage errors',async()
  for(const [flag,value]of [['--max-nodes','501'],['--max-depth','21'],['--max-files','5001'],['--timeout-ms','60001']])assert.equal(await main([...args,flag,value]),2);
  assert.equal(await main(['analyze','--repo','','--base','HEAD','--head','HEAD','--repository','https://github.com/example/project','--out','unused']),2);
 });
+test('TypeScript project-reference build semantics are reported as unsupported',async()=>{
+ const result=await scanFiles({'tsconfig.json':JSON.stringify({references:[{path:'./packages/core'}]}),'src/api.ts':'export const api=1;'});
+ assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='tsconfig.json'&&w.detail.includes('project references are not modeled')));
+});
 test('read-only doctor validates exact history and outside output paths without writing',async()=>{
  const f=fixture({'core.ts':'export const x=1;'});const base=git(f.repo,'rev-parse','HEAD'),out=path.join(f.dir,'doctor-output');
  try{

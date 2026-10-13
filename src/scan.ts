@@ -230,7 +230,9 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   const text=snapshot.files.get(file),parsed=text?ts.parseConfigFileTextToJson(file,text):undefined;
   if(!parsed||parsed.error||!parsed.config||typeof parsed.config!=='object')warn('CONFIG_UNSUPPORTED',file,'Invalid TypeScript config JSON');
   else {
-   const config=parsed.config as Record<string,unknown>;const parentPaths=typeof config.extends==='string'?[config.extends]:Array.isArray(config.extends)?config.extends.filter((v):v is string=>typeof v==='string'):[];
+   const config=parsed.config as Record<string,unknown>;
+   if(config.references!==undefined&&(!Array.isArray(config.references)||config.references.length>0))warn('CONFIG_UNSUPPORTED',file,'TypeScript project references are not modeled; analysis follows source imports only');
+   const parentPaths=typeof config.extends==='string'?[config.extends]:Array.isArray(config.extends)?config.extends.filter((v):v is string=>typeof v==='string'):[];
    if(config.extends!==undefined&&(!Array.isArray(config.extends)&&typeof config.extends!=='string'||Array.isArray(config.extends)&&parentPaths.length!==config.extends.length))warn('CONFIG_UNSUPPORTED',file,'Unsupported TypeScript extends value');
    for(const parent of parentPaths){
     if(!parent.startsWith('.')||parent.includes('\\')){warn('CONFIG_UNSUPPORTED',file,'External TypeScript extends is not followed: '+parent);continue;}

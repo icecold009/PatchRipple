@@ -13,6 +13,50 @@ const MAX_WORKSPACE_GLOB_WORK=2_000_000;
 const MAX_EXPORTS_CONDITION_DEPTH=64;
 const MAX_EXPORTS_CONDITION_NODES=4096;
 const MAX_JS_AST_NODES=100_000;
+function yamlWorkspaceScalar(raw:string):string|undefined {
+ let quote:'"'|"'"|undefined,comment=raw.length;
+ for(let i=0;i<raw.length;i++){
+  const character=raw[i];
+  if(quote==='"'&&character==='\\'){i++;continue;}
+  if(quote==="'"&&character==="'"&&raw[i+1]==="'"){i++;continue;}
+  if(quote&&character===quote){quote=undefined;continue;}
+  if(!quote&&(character==='"'||character==="'")){quote=character;continue;}
+  if(!quote&&character==='#'&&(i===0||/\s/.test(raw[i-1]))){comment=i;break;}
+ }
+ if(quote)return;
+ const value=raw.slice(0,comment).trim();if(!value)return;
+ if(value.startsWith("'")){
+  if(!value.endsWith("'")||value.length<2)return;
+  let result='';
+  for(let i=1;i<value.length-1;i++){
+   if(value[i]==="'"){if(value[i+1]!=="'")return;result+="'";i++;}else result+=value[i];
+  }
+  return result;
+ }
+ if(value.startsWith('"')){try{const parsed=JSON.parse(value);return typeof parsed==='string'?parsed:undefined;}catch{return;}}
+ if('!&*|>{[`,'.includes(value[0])||/:\s/.test(value))return;
+ return value;
+}
+function pnpmWorkspacePatterns(text:string):{patterns:string[];error?:string} {
+ let inPackages=false,found=false;const patterns:string[]=[];
+ for(const line of text.replace(/^\uFEFF/,'').split(/\r?\n/)){
+  const trimmed=line.trim();if(!trimmed||trimmed.startsWith('#'))continue;
+  if(!/^\s/.test(line)){
+   inPackages=false;
+   const entry=/^packages:\s*(.*)$/.exec(line);
+   if(entry){found=true;if(entry[1].replace(/\s+#.*$/,'').trim())return {patterns,error:'Inline packages values are unsupported; use a simple YAML list'};inPackages=true;}
+   continue;
+  }
+  if(!inPackages)continue;
+  const item=/^\s{2,}-\s*(.*)$/.exec(line);
+  if(!item)return {patterns,error:'Workspace entries must be simple package pattern strings'};
+  const pattern=yamlWorkspaceScalar(item[1]);
+  if(!pattern)return {patterns,error:'Workspace entry is not a supported YAML string'};
+  patterns.push(pattern);
+ }
+ if(!found)return {patterns,error:'A top-level packages list was not found'};
+ return {patterns};
+}
 export interface Scan {edges:Edge[];warnings:Warning[]}
 interface Import {name:string;kind:Kind;members?:string[]}
 export function jsImports(source:string,file:string):{imports:Import[];warnings:string[]} {
@@ -89,17 +133,26 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
  const rootManifest=packageDirs.get('')??{};
  const workspaceObject=rootManifest.workspaces&&typeof rootManifest.workspaces==='object'&&!Array.isArray(rootManifest.workspaces)?rootManifest.workspaces as {packages?:unknown}:undefined;
  const workspaceFieldValid=Array.isArray(rootManifest.workspaces)||!!workspaceObject&&Array.isArray(workspaceObject.packages);
- const workspacesRaw=Array.isArray(rootManifest.workspaces)?rootManifest.workspaces:workspaceFieldValid?(workspaceObject!.packages as string[]):[];
+ const packageWorkspacePatterns=Array.isArray(rootManifest.workspaces)?rootManifest.workspaces:workspaceFieldValid?(workspaceObject!.packages as string[]):[];
+ let workspacesRaw:unknown[]=packageWorkspacePatterns,workspaceConfigPath='package.json';
  if(rootManifest.workspaces!==undefined&&!workspaceFieldValid)warn('CONFIG_UNSUPPORTED','package.json','Workspace declarations must be a string array or an object with a packages array');
+ const pnpmWorkspace=snapshot.files.get('pnpm-workspace.yaml');
+ if(pnpmWorkspace!==undefined){
+  workspaceConfigPath='pnpm-workspace.yaml';const parsed=pnpmWorkspacePatterns(pnpmWorkspace);
+  if(parsed.error){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,parsed.error);workspacesRaw=[];}
+  else if(rootManifest.workspaces!==undefined&&workspaceFieldValid&&JSON.stringify(packageWorkspacePatterns)!==JSON.stringify(parsed.patterns)){
+   warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'pnpm-workspace.yaml and package.json declare different workspace patterns; workspace resolution was skipped');workspacesRaw=[];
+  }else workspacesRaw=parsed.patterns;
+ }
  type WorkspacePattern={exclude:boolean;tokens:({kind:'literal';value:string}|{kind:'one'}|{kind:'star';crossesSlash:boolean})[]};
  const workspacePatterns:WorkspacePattern[]=[];
  const workspacePatternLimitExceeded=workspacesRaw.length>MAX_WORKSPACE_PATTERNS;
- if(workspacePatternLimitExceeded)warn('CONFIG_UNSUPPORTED','package.json','Workspace pattern count exceeds 256; workspace resolution was skipped');
+ if(workspacePatternLimitExceeded)warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Workspace pattern count exceeds 256; workspace resolution was skipped');
  if(!workspacePatternLimitExceeded)for(const raw of workspacesRaw){
-  if(typeof raw!=='string'){warn('CONFIG_UNSUPPORTED','package.json','Unsupported workspace pattern: '+String(raw));continue;}
+  if(typeof raw!=='string'){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported workspace pattern: '+String(raw));continue;}
   const exclude=raw.startsWith('!'),pattern=raw.replace(/^!/,'').replace(/^\.\//,'').replace(/\/$/,'');
   if(pattern.includes('{')||pattern.includes('[')||pattern.includes(']')||pattern.length>MAX_WORKSPACE_PATTERN_LENGTH||!safePath(pattern.replaceAll('*','x').replaceAll('?','x'))){
-   warn('CONFIG_UNSUPPORTED','package.json','Unsupported or oversized workspace pattern: '+raw);continue;
+   warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported or oversized workspace pattern: '+raw);continue;
   }
   const chars=Array.from(pattern),tokens:WorkspacePattern['tokens']=[];
   for(let i=0;i<chars.length;i++){
@@ -148,9 +201,9 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   if(!dir||typeof manifest.name!=='string')continue;
   const included=matchesAny(includePatterns,dir),excluded=matchesAny(excludePatterns,dir);
   if(workspaceGlobLimitExceeded)break;
-  if(included&&!excluded){if(workspaces.has(manifest.name)&&workspaces.get(manifest.name)!.dir!==dir){ambiguousWorkspaces.add(manifest.name);workspaces.delete(manifest.name);warn('CONFIG_UNSUPPORTED','package.json','Duplicate workspace package name is ambiguous: '+manifest.name);}else if(!ambiguousWorkspaces.has(manifest.name))workspaces.set(manifest.name,{dir,manifest});}
+  if(included&&!excluded){if(workspaces.has(manifest.name)&&workspaces.get(manifest.name)!.dir!==dir){ambiguousWorkspaces.add(manifest.name);workspaces.delete(manifest.name);warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Duplicate workspace package name is ambiguous: '+manifest.name);}else if(!ambiguousWorkspaces.has(manifest.name))workspaces.set(manifest.name,{dir,manifest});}
  }
- if(workspaceGlobLimitExceeded){workspaces.clear();ambiguousWorkspaces.clear();warn('CONFIG_UNSUPPORTED','package.json','Workspace glob matching exceeded its safety budget; workspace resolution was skipped');}
+ if(workspaceGlobLimitExceeded){workspaces.clear();ambiguousWorkspaces.clear();warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Workspace glob matching exceeded its safety budget; workspace resolution was skipped');}
  const configCache=new Map<string,Config>();
  const resolvingConfigs=new Set<string>();
  const configFileFor=(from:string):string|undefined=>{

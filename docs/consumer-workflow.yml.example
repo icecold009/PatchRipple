@@ -1,5 +1,5 @@
-# Replace PATCHRIPPLE_COMMIT with a reviewed published full SHA before installing.
-# This template is not hosted verification evidence.
+# Immutable pre-release pin for reviewed main commit 4b45616; check RELEASE_EVIDENCE.md before upgrading.
+# This template is not hosted verification evidence for a consumer repository.
 name: Static PR impact
 on:
   pull_request:
@@ -33,7 +33,7 @@ jobs:
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$HEAD_SHA^{commit}"
           git merge-base "$BASE_SHA" "$HEAD_SHA"
-      - uses: icecold009/PatchRipple@PATCHRIPPLE_COMMIT
+      - uses: icecold009/PatchRipple@4b45616e941ebe349b845a62a8941c586fbb18c5
         id: impact
         with:
           base: ${{ github.event.pull_request.base.sha }}

@@ -220212,6 +220212,83 @@ var MAX_WORKSPACE_GLOB_WORK = 2e6;
 var MAX_EXPORTS_CONDITION_DEPTH = 64;
 var MAX_EXPORTS_CONDITION_NODES = 4096;
 var MAX_JS_AST_NODES = 1e5;
+function yamlWorkspaceScalar(raw) {
+  let quote, comment = raw.length;
+  for (let i = 0; i < raw.length; i++) {
+    const character = raw[i];
+    if (quote === '"' && character === "\\") {
+      i++;
+      continue;
+    }
+    if (quote === "'" && character === "'" && raw[i + 1] === "'") {
+      i++;
+      continue;
+    }
+    if (quote && character === quote) {
+      quote = void 0;
+      continue;
+    }
+    if (!quote && (character === '"' || character === "'")) {
+      quote = character;
+      continue;
+    }
+    if (!quote && character === "#" && (i === 0 || /\s/.test(raw[i - 1]))) {
+      comment = i;
+      break;
+    }
+  }
+  if (quote) return;
+  const value = raw.slice(0, comment).trim();
+  if (!value) return;
+  if (value.startsWith("'")) {
+    if (!value.endsWith("'") || value.length < 2) return;
+    let result = "";
+    for (let i = 1; i < value.length - 1; i++) {
+      if (value[i] === "'") {
+        if (value[i + 1] !== "'") return;
+        result += "'";
+        i++;
+      } else result += value[i];
+    }
+    return result;
+  }
+  if (value.startsWith('"')) {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === "string" ? parsed : void 0;
+    } catch {
+      return;
+    }
+  }
+  if ("!&*|>{[`,".includes(value[0]) || /:\s/.test(value)) return;
+  return value;
+}
+function pnpmWorkspacePatterns(text) {
+  let inPackages = false, found = false;
+  const patterns = [];
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (!/^\s/.test(line)) {
+      inPackages = false;
+      const entry = /^packages:\s*(.*)$/.exec(line);
+      if (entry) {
+        found = true;
+        if (entry[1].replace(/\s+#.*$/, "").trim()) return { patterns, error: "Inline packages values are unsupported; use a simple YAML list" };
+        inPackages = true;
+      }
+      continue;
+    }
+    if (!inPackages) continue;
+    const item = /^\s{2,}-\s*(.*)$/.exec(line);
+    if (!item) return { patterns, error: "Workspace entries must be simple package pattern strings" };
+    const pattern = yamlWorkspaceScalar(item[1]);
+    if (!pattern) return { patterns, error: "Workspace entry is not a supported YAML string" };
+    patterns.push(pattern);
+  }
+  if (!found) return { patterns, error: "A top-level packages list was not found" };
+  return { patterns };
+}
 function jsImports(source, file) {
   const imports = [], warnings = [];
   let sf;
@@ -220348,19 +220425,32 @@ async function scan(snapshot, revision2, roots, deadline) {
   const rootManifest = packageDirs.get("") ?? {};
   const workspaceObject = rootManifest.workspaces && typeof rootManifest.workspaces === "object" && !Array.isArray(rootManifest.workspaces) ? rootManifest.workspaces : void 0;
   const workspaceFieldValid = Array.isArray(rootManifest.workspaces) || !!workspaceObject && Array.isArray(workspaceObject.packages);
-  const workspacesRaw = Array.isArray(rootManifest.workspaces) ? rootManifest.workspaces : workspaceFieldValid ? workspaceObject.packages : [];
+  const packageWorkspacePatterns = Array.isArray(rootManifest.workspaces) ? rootManifest.workspaces : workspaceFieldValid ? workspaceObject.packages : [];
+  let workspacesRaw = packageWorkspacePatterns, workspaceConfigPath = "package.json";
   if (rootManifest.workspaces !== void 0 && !workspaceFieldValid) warn("CONFIG_UNSUPPORTED", "package.json", "Workspace declarations must be a string array or an object with a packages array");
+  const pnpmWorkspace = snapshot.files.get("pnpm-workspace.yaml");
+  if (pnpmWorkspace !== void 0) {
+    workspaceConfigPath = "pnpm-workspace.yaml";
+    const parsed = pnpmWorkspacePatterns(pnpmWorkspace);
+    if (parsed.error) {
+      warn("CONFIG_UNSUPPORTED", workspaceConfigPath, parsed.error);
+      workspacesRaw = [];
+    } else if (rootManifest.workspaces !== void 0 && workspaceFieldValid && JSON.stringify(packageWorkspacePatterns) !== JSON.stringify(parsed.patterns)) {
+      warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "pnpm-workspace.yaml and package.json declare different workspace patterns; workspace resolution was skipped");
+      workspacesRaw = [];
+    } else workspacesRaw = parsed.patterns;
+  }
   const workspacePatterns = [];
   const workspacePatternLimitExceeded = workspacesRaw.length > MAX_WORKSPACE_PATTERNS;
-  if (workspacePatternLimitExceeded) warn("CONFIG_UNSUPPORTED", "package.json", "Workspace pattern count exceeds 256; workspace resolution was skipped");
+  if (workspacePatternLimitExceeded) warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Workspace pattern count exceeds 256; workspace resolution was skipped");
   if (!workspacePatternLimitExceeded) for (const raw of workspacesRaw) {
     if (typeof raw !== "string") {
-      warn("CONFIG_UNSUPPORTED", "package.json", "Unsupported workspace pattern: " + String(raw));
+      warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Unsupported workspace pattern: " + String(raw));
       continue;
     }
     const exclude = raw.startsWith("!"), pattern = raw.replace(/^!/, "").replace(/^\.\//, "").replace(/\/$/, "");
     if (pattern.includes("{") || pattern.includes("[") || pattern.includes("]") || pattern.length > MAX_WORKSPACE_PATTERN_LENGTH || !safePath(pattern.replaceAll("*", "x").replaceAll("?", "x"))) {
-      warn("CONFIG_UNSUPPORTED", "package.json", "Unsupported or oversized workspace pattern: " + raw);
+      warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Unsupported or oversized workspace pattern: " + raw);
       continue;
     }
     const chars = Array.from(pattern), tokens = [];
@@ -220438,14 +220528,14 @@ async function scan(snapshot, revision2, roots, deadline) {
       if (workspaces.has(manifest.name) && workspaces.get(manifest.name).dir !== dir) {
         ambiguousWorkspaces.add(manifest.name);
         workspaces.delete(manifest.name);
-        warn("CONFIG_UNSUPPORTED", "package.json", "Duplicate workspace package name is ambiguous: " + manifest.name);
+        warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Duplicate workspace package name is ambiguous: " + manifest.name);
       } else if (!ambiguousWorkspaces.has(manifest.name)) workspaces.set(manifest.name, { dir, manifest });
     }
   }
   if (workspaceGlobLimitExceeded) {
     workspaces.clear();
     ambiguousWorkspaces.clear();
-    warn("CONFIG_UNSUPPORTED", "package.json", "Workspace glob matching exceeded its safety budget; workspace resolution was skipped");
+    warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Workspace glob matching exceeded its safety budget; workspace resolution was skipped");
   }
   const configCache = /* @__PURE__ */ new Map();
   const resolvingConfigs = /* @__PURE__ */ new Set();

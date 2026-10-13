@@ -83,6 +83,27 @@ test('workspace exports and nested inherited TypeScript aliases resolve without 
  });
  assert.equal(result.warnings.length,0);assert.deepEqual(result.edges.map(e=>e.to),['file:shared/core.ts','file:packages/ui/src/index.ts']);
 });
+test('pnpm workspace YAML simple include and exclude patterns resolve local packages',async()=>{
+ const result=await scanFiles({
+  'pnpm-workspace.yaml':"packages:\n  - 'packages/**'\n  - '!packages/private' # exclude private tools\n",
+  'packages/ui/package.json':JSON.stringify({name:'@demo/ui',exports:{'.':'./src/index.js'}}),
+  'packages/ui/src/index.ts':'export const ui=1;',
+  'packages/private/package.json':JSON.stringify({name:'@demo/private'}),
+  'api.ts':"import '@demo/ui'; import '@demo/private';"
+ });
+ assert.ok(result.edges.some(e=>e.to==='file:packages/ui/src/index.ts'));
+ assert.ok(result.warnings.some(w=>w.code==='EXPECTED_EXTERNAL_IMPORT'&&w.path==='api.ts'));
+ assert.equal(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='pnpm-workspace.yaml'),false);
+});
+test('unsupported pnpm workspace YAML stays visibly incomplete instead of guessing',async()=>{
+ const result=await scanFiles({
+  'pnpm-workspace.yaml':'packages: [packages/*]\n',
+  'packages/ui/package.json':JSON.stringify({name:'@demo/ui'}),
+  'api.ts':"import '@demo/ui';"
+ });
+ assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='pnpm-workspace.yaml'));
+ assert.equal(result.edges.length,0);
+});
 test('workspace conditional exports follow import, require, and type-only forms',async()=>{
  const result=await scanFiles({
   'package.json':JSON.stringify({workspaces:['packages/*']}),

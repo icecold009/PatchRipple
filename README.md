@@ -18,7 +18,7 @@ PatchRipple reads exact Git revisions and maps changed files to potential import
 - Produces an offline HTML report, JSON graph, SVG map, and metadata file.
 - Shows uncertainty, warnings, and analysis limits instead of presenting guesses as proof.
 
-The CLI and Action read repository data and create the report in the environment where you run them. They do not execute code, configuration, or hooks from the repository being analyzed, and they do not install its dependencies.
+The analyzer and Action read repository data and create the report in the environment where you run them. The explicit `fetch-pr` command retrieves only a public GitHub base branch and PR head into PatchRipple-owned refs. These commands do not execute code, configuration, or hooks from the repository being analyzed, and they do not install its dependencies.
 
 ## Try the demo
 
@@ -26,38 +26,36 @@ The animated preview above and the [clickable walkthrough](docs/demo/walkthrough
 
 ## Quick start
 
-Use Node.js 24 or newer and Git. The bundled CLI is `dist/cli.cjs`; no PatchRipple dependency installation is needed inside the target repository. This evidence snapshot records no GitHub release or version tag. To use the current reviewed source at an immutable commit:
+Use Node.js 24 or newer and npm. This evidence snapshot has no GitHub release or version tag. To install the verified open PR #7 candidate from an immutable source archive, without cloning Git:
 
 ~~~sh
-git clone https://github.com/icecold009/PatchRipple.git /path/to/PatchRipple
-git -C /path/to/PatchRipple checkout --detach 4b45616e941ebe349b845a62a8941c586fbb18c5
-node /path/to/PatchRipple/dist/cli.cjs --version
+npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/23d73a9af77f9f758274ee4db82695bb7cfe6bc5.tar.gz"
+patchripple --version
 ~~~
 
-That pin is the merged `main` commit verified on 2026-10-13. Review [release evidence](docs/RELEASE_EVIDENCE.md) before choosing a newer commit.
+The pinned code-bearing commit passed hosted CI and Static PR impact checks. PR #7 remains an open draft; this candidate is not merged or a versioned release. The merged `main` pin is `4b45616e941ebe349b845a62a8941c586fbb18c5`. Review [release evidence](docs/RELEASE_EVIDENCE.md) before choosing a source revision.
 
-If an exact PR revision is missing from the target repository, fetch its base and pull-request head into PatchRipple-owned refs:
+For a public GitHub PR whose exact commits are missing from the target clone, fetch the base branch and PR head into PatchRipple-owned refs:
 
 ~~~sh
-git -C /path/to/target remote -v
-git -C /path/to/target -c core.hooksPath=/dev/null fetch --no-tags --no-recurse-submodules origin +refs/heads/main:refs/patchripple/manual/base +refs/pull/123/head:refs/patchripple/manual/head
+patchripple fetch-pr --repo /path/to/target --repository OWNER/REPOSITORY --base-branch main --pr 123
 ~~~
 
-Check that `origin` points to the intended repository before fetching. This network operation changes Git objects and creates or updates the `refs/patchripple/manual/*` refs, but leaves the target branch and working tree untouched. Replace `main` and `123` with the PR's actual base branch and number. The command disables repository hooks for this fetch.
+Replace the repository, base branch, and PR number with the public PR's values. The command uses HTTPS, rejects local Git URL rewrites, disables credential helpers, hooks, tags, and recursive submodules, and atomically updates only `refs/patchripple/manual/base` and `refs/patchripple/manual/head`. It downloads Git objects but leaves the checked-out branch and working tree untouched. It does not support private repositories.
 
 First check that the revisions and output path are usable:
 
 ~~~sh
-node /path/to/PatchRipple/dist/cli.cjs doctor --repo /path/to/target --base BASE_SHA --head HEAD_SHA --out /path/to/new-report
+patchripple doctor --repo /path/to/target --base refs/patchripple/manual/base --head refs/patchripple/manual/head --out /path/to/new-report
 ~~~
 
 Then generate the report in that same new path:
 
 ~~~sh
-node /path/to/PatchRipple/dist/cli.cjs analyze --repo /path/to/target --base BASE_SHA --head HEAD_SHA --repository https://github.com/OWNER/REPOSITORY --out /path/to/new-report
+patchripple analyze --repo /path/to/target --base refs/patchripple/manual/base --head refs/patchripple/manual/head --repository https://github.com/OWNER/REPOSITORY --out /path/to/new-report
 ~~~
 
-`doctor` creates no files, so its output path can be reused by `analyze`. The output directory must be new and outside the target repository; existing paths are refused. With the fetch command above, use `refs/patchripple/manual/base` and `refs/patchripple/manual/head` for `--base` and `--head` in both commands. In a shallow clone, deepen or unshallow the requested history if `doctor` cannot find the merge base. `doctor` itself remains read-only.
+`doctor` creates no files, so its output path can be reused by `analyze`. The output directory must be new and outside the target repository; existing paths are refused. In a shallow clone, deepen or unshallow the requested history if `doctor` cannot find the merge base. `doctor` itself remains read-only; `fetch-pr` writes the two namespaced refs and fetched objects.
 
 PR mode is the default: it compares `merge-base(base, head)` to `head`. Use `--mode direct` to compare exactly the two supplied revisions.
 

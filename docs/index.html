@@ -11,14 +11,18 @@
 <body><main>
 <nav aria-label="Documentation"><a href="demo/walkthrough.html">60-second guided demo</a><a href="demo/index.html">Explore report</a><a href="#install">Install</a><a href="#scope">Coverage</a><a href="#trust">Trust and sharing</a></nav>
 <header><p>PATCHRIPPLE / OPEN SOURCE</p><h1>See what a pull request may affect.</h1><p>A deterministic CLI and GitHub Action that map changed files, static import dependents, related tests, and repository owners. Keep the offline output or publish it yourself.</p><p class="note">Static candidates are possibilities, not runtime effects, coverage, or change-safety proof. Incomplete analysis remains visibly incomplete.</p></header>
-<section id="install"><h2>Install a pinned CLI</h2><p>Node 24 and Git are required. This evidence snapshot records no GitHub release or version tag. This immutable source pin is the reviewed main commit as of 2026-10-13:</p>
-<pre><code>git clone https://github.com/icecold009/PatchRipple.git /path/to/PatchRipple
-git -C /path/to/PatchRipple checkout --detach 4b45616e941ebe349b845a62a8941c586fbb18c5
-node /path/to/PatchRipple/dist/cli.cjs --version</code></pre>
-<h2>Fetch and analyze a pull request</h2><p>Fetch exact refs without changing the target branch or working tree. This writes Git objects and namespaced refs; repository hooks are disabled for the fetch.</p>
-<pre><code>git -C /path/to/target -c core.hooksPath=/dev/null fetch --no-tags --no-recurse-submodules origin +refs/heads/main:refs/patchripple/manual/base +refs/pull/123/head:refs/patchripple/manual/head
-node /path/to/PatchRipple/dist/cli.cjs doctor --repo /path/to/target --base refs/patchripple/manual/base --head refs/patchripple/manual/head --out /path/to/new-bundle
-node /path/to/PatchRipple/dist/cli.cjs analyze --repo /path/to/target --base refs/patchripple/manual/base --head refs/patchripple/manual/head --repository https://github.com/owner/repo --out /path/to/new-bundle</code></pre>
+<section id="install"><h2>Install merged main</h2><p>Use Node.js 24 or newer and npm. The main source pin is immutable and installs from an HTTPS archive without a Git clone:</p>
+<pre><code>npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/4b45616e941ebe349b845a62a8941c586fbb18c5.tar.gz"
+patchripple --version</code></pre>
+<p>This evidence snapshot records no GitHub release or version tag.</p>
+<h2>Install the PR #7 candidate</h2><p>The verified pre-release candidate is pinned to a full commit SHA and installs from an HTTPS archive without a Git clone:</p>
+<pre><code>npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/23d73a9af77f9f758274ee4db82695bb7cfe6bc5.tar.gz"
+patchripple --version</code></pre>
+<p>This is the code-bearing commit from open draft PR #7, not a merged or versioned release. See the <a href="RELEASE_EVIDENCE.md">release evidence</a> before using it.</p>
+<h2>Fetch and analyze a pull request</h2><p>For a public GitHub PR, fetch its base branch and head into fixed PatchRipple refs. This downloads Git objects but does not check out or run target code; it leaves the target branch and working tree unchanged. Local URL rewrites cause the command to stop.</p>
+<pre><code>patchripple fetch-pr --repo /path/to/target --repository owner/repo --base-branch main --pr 123
+patchripple doctor --repo /path/to/target --base refs/patchripple/manual/base --head refs/patchripple/manual/head --out /path/to/new-bundle
+patchripple analyze --repo /path/to/target --base refs/patchripple/manual/base --head refs/patchripple/manual/head --repository https://github.com/owner/repo --out /path/to/new-bundle</code></pre>
 <p>The read-only doctor checks Node, Git history, exact revisions, and whether the output location is new and outside the target. PR mode compares the merge-base of the base tip and head. Use <code>--mode direct</code> for an explicit two-commit comparison. In shallow clones, fetch enough history for Git to find the merge base.</p>
 <p>Open <code>index.html</code> from the generated bundle. It contains all required assets and data; there are no external requests. The bundle also includes graph JSON, SVG, and run metadata. The list and graph expose exact revision attribution.</p>
 <h2>Install the Action</h2><p>Use the <a href="consumer-workflow.yml.example">read-only consumer workflow template</a>, pinned to the full commit <code>4b45616e941ebe349b845a62a8941c586fbb18c5</code>. This is an immutable pre-release pin, not a versioned release. Keep <code>pull_request</code>, <code>contents: read</code>, and <code>persist-credentials: false</code>. The trusted Action ships with its parser assets; it never installs dependencies or executes scripts from the target PR.</p></section>

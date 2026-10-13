@@ -95,7 +95,7 @@ try{
  }
  if(!process.env.PATCHRIPPLE_DEMO_PATH){const readme=await readFile(path.resolve('README.md'),'utf8');assert.match(readme,/!\[[^\]]+\]\(docs\/demo\/preview\.gif\)/);const preview=await readFile(path.resolve('docs/demo/preview.gif'));assert.match(preview.subarray(0,6).toString('ascii'),/^GIF8[79]a$/);assert.ok(preview.length<1_000_000);
  await page.goto(pathToFileURL(path.resolve('docs/index.html')).href);
- assert.match(await page.title(),/repo-local PR impact maps/);assert.ok(await page.getByRole('heading',{name:'Run locally',exact:true}).isVisible());
+ assert.match(await page.title(),/repo-local PR impact maps/);assert.ok(await page.getByRole('heading',{name:'Install a pinned CLI',exact:true}).isVisible());
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  await page.getByRole('link',{name:'60-second guided demo',exact:true}).click();
  assert.match(await page.title(),/Guided demo/);assert.match(await page.locator('h1').textContent(),/One changed file/);

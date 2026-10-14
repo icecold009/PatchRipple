@@ -27,14 +27,14 @@ The animated preview above and the [clickable walkthrough](docs/demo/walkthrough
 
 ## Quick start
 
-Use Node.js 24 or newer and npm. This snapshot has no versioned GitHub release or tag, and the public npm registry has no `patchripple` package. The last archive install smoke used an earlier PR #7 snapshot; the current code-bearing commit `d12fd77960e72112832aedd139a8b51cde00d058` adds TypeScript `customConditions` support and is awaiting exact-head hosted checks.
+Use Node.js 24 or newer and npm. This snapshot has no versioned GitHub release or tag, and the public npm registry has no `patchripple` package. To install the current PR #7 code-bearing candidate from its immutable HTTPS archive, without cloning Git:
 
 ~~~sh
-npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/882829946897c3ce461aa0e0169700f569231b78.tar.gz"
+npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/d12fd77960e72112832aedd139a8b51cde00d058.tar.gz"
 patchripple --version
 ~~~
 
-The pinned earlier code-bearing commit `882829946897c3ce461aa0e0169700f569231b78` passed local lint, typecheck, all 61 tests, build, package smoke, generated-file consistency, and exact-head hosted [Trusted CI #77](https://github.com/icecold009/PatchRipple/actions/runs/38434003043) and [Static PR impact #30](https://github.com/icecold009/PatchRipple/actions/runs/38434009393). CI #77 includes generated browser fixtures and Chromium, Firefox, and WebKit checks. The full-SHA archive installed into an isolated npm prefix; `patchripple --version` and `--help` succeeded. The current resolver commit passes 64 local tests, package smoke, and generated-file consistency; its [Trusted CI #82](https://github.com/icecold009/PatchRipple/actions/runs/38538870223) and [Static PR impact #32](https://github.com/icecold009/PatchRipple/actions/runs/38538870203) are queued. PR #7 remains an open draft; neither candidate is merged or a versioned release. The merged `main` pin is `4b45616e941ebe349b845a62a8941c586fbb18c5`. Review [release evidence](docs/RELEASE_EVIDENCE.md) before choosing a source revision.
+The pinned code-bearing commit `d12fd77960e72112832aedd139a8b51cde00d058` adds explicit TypeScript `customConditions` support and passed local lint, typecheck, all 64 tests, build, package smoke, generated-file consistency, exact-head hosted [Trusted CI #82](https://github.com/icecold009/PatchRipple/actions/runs/38538870223), and [Static PR impact #32](https://github.com/icecold009/PatchRipple/actions/runs/38538870203). CI #82 includes generated browser fixtures and Chromium, Firefox, and WebKit checks. Its full-SHA archive installed into an isolated npm prefix; `patchripple --version` and `--help` succeeded. PR #7 remains an open draft; this candidate is not merged or a versioned release. The merged `main` pin is `4b45616e941ebe349b845a62a8941c586fbb18c5`. Review [release evidence](docs/RELEASE_EVIDENCE.md) before choosing a source revision.
 
 For a public GitHub PR whose exact commits are missing from the target clone, fetch the base branch and PR head into PatchRipple-owned refs:
 

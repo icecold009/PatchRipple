@@ -233,6 +233,60 @@ test('workspace conditional exports follow import, require, and type-only forms'
  ]);
  assert.equal(result.warnings.length,0);
 });
+test('TypeScript custom conditions select workspace source exports through inherited configs',async()=>{
+ const result=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/*']}),
+  'tsconfig.base.json':JSON.stringify({compilerOptions:{moduleResolution:'Bundler',customConditions:['source']}}),
+  'packages/app/tsconfig.json':JSON.stringify({extends:'../../tsconfig.base.json',compilerOptions:{customConditions:['development']}}),
+  'packages/app/api.ts':"import '@demo/lib'; require('@demo/lib'); import type {Flavor} from '@demo/lib'; export type {Flavor};",
+  'packages/lib/package.json':JSON.stringify({name:'@demo/lib',exports:{'.':{source:{types:'./src/source.d.ts',import:'./src/source.ts',require:'./src/source.cjs'},development:{types:'./src/development.d.ts',import:'./src/development.ts',require:'./src/development.cjs'},import:'./src/import.ts'}}}),
+  'packages/lib/src/source.d.ts':'export interface Flavor {source:true}',
+  'packages/lib/src/source.ts':'export const flavor="source";',
+  'packages/lib/src/source.cjs':'module.exports = {};',
+  'packages/lib/src/development.d.ts':'export interface Flavor {development:true}',
+  'packages/lib/src/development.ts':'export const flavor="development";',
+  'packages/lib/src/development.cjs':'module.exports = {};',
+  'packages/lib/src/import.ts':'export const flavor="import";'
+ });
+ assert.deepEqual(result.edges.map(e=>[e.kind,e.to]),[
+  ['static','file:packages/lib/src/development.ts'],
+  ['require','file:packages/lib/src/development.cjs'],
+  ['type-only','file:packages/lib/src/development.d.ts']
+ ]);
+ assert.equal(result.warnings.length,0);
+ const withoutCustomCondition=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/*']}),
+  'packages/lib/package.json':JSON.stringify({name:'@demo/lib',exports:{'.':{source:'./src/source.ts',import:'./src/import.ts'}}}),
+  'packages/lib/src/source.ts':'export const flavor="source";',
+  'packages/lib/src/import.ts':'export const flavor="import";',
+  'api.ts':"import '@demo/lib';"
+ });
+ assert.deepEqual(withoutCustomCondition.edges.map(e=>e.to),['file:packages/lib/src/import.ts']);
+});
+test('unsupported TypeScript custom-condition configuration warns and uses standard exports only',async()=>{
+ const result=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/*']}),
+  'tsconfig.json':JSON.stringify({compilerOptions:{moduleResolution:'Classic',customConditions:['source']}}),
+  'packages/lib/package.json':JSON.stringify({name:'@demo/lib',exports:{'.':{source:'./src/source.ts',import:'./src/import.ts'}}}),
+  'packages/lib/src/source.ts':'export const flavor="source";',
+  'packages/lib/src/import.ts':'export const flavor="import";',
+  'api.ts':"import '@demo/lib';"
+ });
+ assert.deepEqual(result.edges.map(e=>e.to),['file:packages/lib/src/import.ts']);
+ assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='tsconfig.json'&&w.detail.includes('customConditions require moduleResolution')));
+});
+test('malformed TypeScript customConditions are ignored with an explicit warning',async()=>{
+ const result=await scanFiles({
+  'package.json':JSON.stringify({workspaces:['packages/*']}),
+  'tsconfig.json':JSON.stringify({compilerOptions:{moduleResolution:'Bundler',customConditions:'source'}}),
+  'packages/lib/package.json':JSON.stringify({name:'@demo/lib',exports:{'.':{source:'./src/source.ts',import:'./src/import.ts'}}}),
+  'packages/lib/src/source.ts':'export const flavor="source";',
+  'packages/lib/src/import.ts':'export const flavor="import";',
+  'api.ts':"import '@demo/lib';"
+ });
+ assert.deepEqual(result.edges.map(e=>e.to),['file:packages/lib/src/import.ts']);
+ assert.ok(result.warnings.some(w=>w.code==='CONFIG_UNSUPPORTED'&&w.path==='tsconfig.json'&&w.detail.includes('customConditions must be an array')));
+});
 test('workspace glob matching stops at a deterministic work budget',async()=>{
  const directory='a/'.repeat(119)+'pkg',pattern='**/'.repeat(120)+'wanted';
  const files:Record<string,string>={'package.json':JSON.stringify({workspaces:Array.from({length:256},()=>pattern)}),'api.ts':"import '@demo/deep';"};

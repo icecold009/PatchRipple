@@ -205,7 +205,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
  const warn=(code:string,p:string,detail:string)=>warnings.push({code,path:p,revision,detail});
  const add=(from:string,to:string,kind:Kind)=>{const e={from:nodeId(from),to:nodeId(to),kind,revision};const key=JSON.stringify(e);if(!edgeSet.has(key)){edgeSet.add(key);edges.push(e);}};
  type Rule={pattern:string;values:string[];base:string};
- type Config={baseUrl?:string;rules:Rule[]};
+ type Config={baseUrl?:string;moduleResolution?:'node16'|'nodenext'|'bundler';customConditions?:string[];rules:Rule[]};
  const packageFiles=[...snapshot.files].filter(([p])=>p.endsWith('/package.json')||p==='package.json');
  const packageDirs=new Map<string,Record<string,unknown>>();
  for(const [p,text] of packageFiles){try{const value=JSON.parse(text);if(!value||typeof value!=='object'||Array.isArray(value))continue;const dir=p==='package.json'?'':path.posix.dirname(p);packageDirs.set(dir,value);}catch{warn('CONFIG_UNSUPPORTED',p,'Invalid package.json; package metadata was ignored');}}
@@ -340,13 +340,26 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
     const base=path.posix.normalize(path.posix.join(path.posix.dirname(file),parent));
     if(!safePath(base)){warn('CONFIG_UNSUPPORTED',file,'Unsafe TypeScript extends path ignored');continue;}
     const candidate=snapshot.files.has(base)?base:snapshot.files.has(base+'.json')?base+'.json':snapshot.files.has(base+'/tsconfig.json')?base+'/tsconfig.json':undefined;
-    if(candidate){const inherited=resolveConfig(candidate,depth+1),merged=new Map(result.rules.map(rule=>[rule.pattern,rule]));for(const rule of inherited.rules)merged.set(rule.pattern,rule);result={baseUrl:inherited.baseUrl??result.baseUrl,rules:[...merged.values()]};}
+    if(candidate){const inherited=resolveConfig(candidate,depth+1),merged=new Map(result.rules.map(rule=>[rule.pattern,rule]));for(const rule of inherited.rules)merged.set(rule.pattern,rule);result={baseUrl:inherited.baseUrl??result.baseUrl,moduleResolution:inherited.moduleResolution??result.moduleResolution,customConditions:inherited.customConditions??result.customConditions,rules:[...merged.values()]};}
     else warn('CONFIG_UNSUPPORTED',file,'Relative TypeScript extends target was not found: '+parent);
    }
    const options=config.compilerOptions;
    if(options!==undefined&&(!options||typeof options!=='object'||Array.isArray(options)))warn('CONFIG_UNSUPPORTED',file,'compilerOptions must be an object');
    else if(options&&typeof options==='object'){
     const compiler=options as Record<string,unknown>;let ruleBase=result.baseUrl??path.posix.dirname(file);
+    if(Object.hasOwn(compiler,'moduleResolution')){
+     const resolution=typeof compiler.moduleResolution==='string'?compiler.moduleResolution.toLowerCase():'';
+     if(resolution==='node16'||resolution==='nodenext'||resolution==='bundler')result.moduleResolution=resolution;
+     else{result.moduleResolution=undefined;if(result.customConditions?.length)warn('CONFIG_UNSUPPORTED',file,'customConditions require moduleResolution node16, nodenext, or bundler');}
+    }
+    if(Object.hasOwn(compiler,'customConditions')){
+     const conditions=compiler.customConditions;
+     if(!Array.isArray(conditions)||!conditions.every(value=>typeof value==='string'&&value.length>0)){
+      result.customConditions=[];warn('CONFIG_UNSUPPORTED',file,'customConditions must be an array of non-empty strings');
+     }else if(!result.moduleResolution){
+      result.customConditions=[];warn('CONFIG_UNSUPPORTED',file,'customConditions require moduleResolution node16, nodenext, or bundler');
+     }else result.customConditions=[...conditions];
+    }
     if(typeof compiler.baseUrl==='string'){
      const next=path.posix.normalize(path.posix.join(path.posix.dirname(file),compiler.baseUrl));
      if(next===''||next==='.')result.baseUrl='';else if(safePath(next))result.baseUrl=next;else warn('CONFIG_UNSUPPORTED',file,'Unsafe baseUrl ignored');
@@ -367,7 +380,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   resolvingConfigs.delete(file);result.rules.sort((a,b)=>Number(a.pattern.includes('*'))-Number(b.pattern.includes('*'))||b.pattern.split('*')[0].length-a.pattern.split('*')[0].length||compare(a.pattern,b.pattern));configCache.set(file,result);return result;
  };
  const effectiveConfig=(from:string):Config=>{const file=configFileFor(from);return file?resolveConfig(file):{rules:[]};};
- const resolveManifestTarget=(dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind):string|undefined=>{
+ const resolveManifestTarget=(dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind,customConditions:readonly string[]):string|undefined=>{
   let target:string|undefined,exportMiddle='';const exportsValue=manifest.exports;
   if(exportsValue!==undefined){
    let value:unknown=exportsValue;
@@ -383,7 +396,8 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
     }else if(!subpath)value=exportsObject;
     else value=undefined;
    }else if(subpath)value=undefined;
-   const activeConditions=kind==='require'?new Set(['require','node','default']):kind==='type-only'?new Set(['types','import','node','default']):new Set(['import','node','default']);
+   const baseConditions=kind==='require'?['require','node','default']:kind==='type-only'?['types','import','node','default']:['import','node','default'];
+   const activeConditions=new Set([...baseConditions,...customConditions]);
    const pick=(root:unknown):string|undefined=>{
     const pending:{value:unknown;depth:number}[]=[{value:root,depth:0}];let visited=0;
     while(pending.length){
@@ -409,24 +423,24 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   if(!target||!target.startsWith('./')||target.includes('\\'))return;
   const relative=path.posix.normalize(path.posix.join(dir,target.slice(2)));return safePath(relative)?relative:undefined;
  };
- const resolvePackagePath=(from:string,dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind):string|undefined=>{
-  const target=resolveManifestTarget(dir,manifest,subpath,kind);if(!target)return;
+ const resolvePackagePath=(from:string,dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind,customConditions:readonly string[]):string|undefined=>{
+  const target=resolveManifestTarget(dir,manifest,subpath,kind,customConditions);if(!target)return;
   for(const candidate of candidates(target,from,kind))if(snapshot.files.has(candidate))return candidate;
  };
  const packageNameAndSubpath=(spec:string):{name:string;subpath:string}=>{
   const parts=spec.split('/');const count=spec.startsWith('@')?2:1;return {name:parts.slice(0,count).join('/'),subpath:parts.slice(count).join('/')};
  };
- const resolveWorkspace=(from:string,spec:string,kind:Kind):string|undefined=>{
+ const resolveWorkspace=(from:string,spec:string,kind:Kind,customConditions:readonly string[]):string|undefined=>{
   const {name,subpath}=packageNameAndSubpath(spec);if(ambiguousWorkspaces.has(name)){warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Duplicate workspace package name is ambiguous: '+name);return;}const pkg=workspaces.get(name);if(!pkg)return;
-  const result=resolvePackagePath(from,pkg.dir,pkg.manifest,subpath,kind);if(!result)warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Workspace import has no unambiguous supported '+kind+' target in its package export map: '+spec);return result;
+  const result=resolvePackagePath(from,pkg.dir,pkg.manifest,subpath,kind,customConditions);if(!result)warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Workspace import has no unambiguous supported '+kind+' target in its package export map: '+spec);return result;
  };
- const resolveDirectoryPackage=(from:string,dir:string,kind:Kind):string|undefined=>{
+ const resolveDirectoryPackage=(from:string,dir:string,kind:Kind,customConditions:readonly string[]):string|undefined=>{
   const manifest=packageDirs.get(dir);if(!manifest)return;
-  const result=resolvePackagePath(from,dir,manifest,'',kind);if(!result)warn('CONFIG_UNSUPPORTED',from,'Package entry has no unambiguous supported '+kind+' target in '+dir+'/package.json');return result;
+  const result=resolvePackagePath(from,dir,manifest,'',kind,customConditions);if(!result)warn('CONFIG_UNSUPPORTED',from,'Package entry has no unambiguous supported '+kind+' target in '+dir+'/package.json');return result;
  };
  const resolveJS=(from:string,spec:string,kind:Kind):string|undefined=>{
   if(spec.includes('\\')||spec.includes('\0')){warn('UNRESOLVED_IMPORT',from,'Unsafe import path');return;}
-  const config=effectiveConfig(from);const bases:string[]=[];let local=spec.startsWith('.');let alias=false;
+  const config=effectiveConfig(from),customConditions=config.moduleResolution?config.customConditions??[]:[];const bases:string[]=[];let local=spec.startsWith('.');let alias=false;
   if(local)bases.push(path.posix.join(path.posix.dirname(from),spec));
   else {
    const matches:Rule[]=[];
@@ -435,9 +449,9 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
    const rule=matches[0];if(rule){local=true;alias=true;const [prefix,suffix]=rule.pattern.split('*');const middle=suffix===undefined?'':spec.slice(prefix.length,spec.length-suffix.length);for(const target of rule.values)bases.push(target.replace('*',middle));}
    if(config.baseUrl!==undefined)bases.push(path.posix.join(config.baseUrl,spec));
   }
-  for(const base of bases){const normalized=path.posix.normalize(base);if(normalized.startsWith('/'))continue;const trimmed=normalized.replace(/\/+$/,''),b=trimmed==='.'?'':trimmed;if(b&&!safePath(b))continue;if(packageDirs.has(b)){const result=resolveDirectoryPackage(from,b,kind);if(result)return result;continue;}for(const c of candidates(b,from,kind))if(snapshot.files.has(c))return c;}
+  for(const base of bases){const normalized=path.posix.normalize(base);if(normalized.startsWith('/'))continue;const trimmed=normalized.replace(/\/+$/,''),b=trimmed==='.'?'':trimmed;if(b&&!safePath(b))continue;if(packageDirs.has(b)){const result=resolveDirectoryPackage(from,b,kind,customConditions);if(result)return result;continue;}for(const c of candidates(b,from,kind))if(snapshot.files.has(c))return c;}
   const workspaceName=packageNameAndSubpath(spec).name,knownWorkspace=workspaces.has(workspaceName);
-  if(!local){const workspace=resolveWorkspace(from,spec,kind);if(workspace)return workspace;if(knownWorkspace)return;}
+  if(!local){const workspace=resolveWorkspace(from,spec,kind,customConditions);if(workspace)return workspace;if(knownWorkspace)return;}
   if(local||alias)warn('UNRESOLVED_IMPORT',from,'Cannot resolve local import '+spec);
   else if(!spec.startsWith('node:')&&!knownWorkspace)warn('EXPECTED_EXTERNAL_IMPORT',from,'External package is excluded from the local import graph: '+spec);
  };

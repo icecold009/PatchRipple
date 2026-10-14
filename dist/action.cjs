@@ -220811,7 +220811,7 @@ async function scan(snapshot, revision2, roots, deadline) {
         if (candidate) {
           const inherited = resolveConfig(candidate, depth + 1), merged = new Map(result.rules.map((rule) => [rule.pattern, rule]));
           for (const rule of inherited.rules) merged.set(rule.pattern, rule);
-          result = { baseUrl: inherited.baseUrl ?? result.baseUrl, rules: [...merged.values()] };
+          result = { baseUrl: inherited.baseUrl ?? result.baseUrl, moduleResolution: inherited.moduleResolution ?? result.moduleResolution, customConditions: inherited.customConditions ?? result.customConditions, rules: [...merged.values()] };
         } else warn("CONFIG_UNSUPPORTED", file, "Relative TypeScript extends target was not found: " + parent);
       }
       const options = config.compilerOptions;
@@ -220819,6 +220819,24 @@ async function scan(snapshot, revision2, roots, deadline) {
       else if (options && typeof options === "object") {
         const compiler = options;
         let ruleBase = result.baseUrl ?? import_node_path.default.posix.dirname(file);
+        if (Object.hasOwn(compiler, "moduleResolution")) {
+          const resolution = typeof compiler.moduleResolution === "string" ? compiler.moduleResolution.toLowerCase() : "";
+          if (resolution === "node16" || resolution === "nodenext" || resolution === "bundler") result.moduleResolution = resolution;
+          else {
+            result.moduleResolution = void 0;
+            if (result.customConditions?.length) warn("CONFIG_UNSUPPORTED", file, "customConditions require moduleResolution node16, nodenext, or bundler");
+          }
+        }
+        if (Object.hasOwn(compiler, "customConditions")) {
+          const conditions = compiler.customConditions;
+          if (!Array.isArray(conditions) || !conditions.every((value) => typeof value === "string" && value.length > 0)) {
+            result.customConditions = [];
+            warn("CONFIG_UNSUPPORTED", file, "customConditions must be an array of non-empty strings");
+          } else if (!result.moduleResolution) {
+            result.customConditions = [];
+            warn("CONFIG_UNSUPPORTED", file, "customConditions require moduleResolution node16, nodenext, or bundler");
+          } else result.customConditions = [...conditions];
+        }
         if (typeof compiler.baseUrl === "string") {
           const next = import_node_path.default.posix.normalize(import_node_path.default.posix.join(import_node_path.default.posix.dirname(file), compiler.baseUrl));
           if (next === "" || next === ".") result.baseUrl = "";
@@ -220850,7 +220868,7 @@ async function scan(snapshot, revision2, roots, deadline) {
     const file = configFileFor(from);
     return file ? resolveConfig(file) : { rules: [] };
   };
-  const resolveManifestTarget = (dir, manifest, subpath, kind) => {
+  const resolveManifestTarget = (dir, manifest, subpath, kind, customConditions) => {
     let target, exportMiddle = "";
     const exportsValue = manifest.exports;
     if (exportsValue !== void 0) {
@@ -220873,7 +220891,8 @@ async function scan(snapshot, revision2, roots, deadline) {
         } else if (!subpath) value = exportsObject;
         else value = void 0;
       } else if (subpath) value = void 0;
-      const activeConditions = kind === "require" ? /* @__PURE__ */ new Set(["require", "node", "default"]) : kind === "type-only" ? /* @__PURE__ */ new Set(["types", "import", "node", "default"]) : /* @__PURE__ */ new Set(["import", "node", "default"]);
+      const baseConditions = kind === "require" ? ["require", "node", "default"] : kind === "type-only" ? ["types", "import", "node", "default"] : ["import", "node", "default"];
+      const activeConditions = /* @__PURE__ */ new Set([...baseConditions, ...customConditions]);
       const pick = (root) => {
         const pending = [{ value: root, depth: 0 }];
         let visited = 0;
@@ -220916,8 +220935,8 @@ async function scan(snapshot, revision2, roots, deadline) {
     const relative = import_node_path.default.posix.normalize(import_node_path.default.posix.join(dir, target.slice(2)));
     return safePath(relative) ? relative : void 0;
   };
-  const resolvePackagePath = (from, dir, manifest, subpath, kind) => {
-    const target = resolveManifestTarget(dir, manifest, subpath, kind);
+  const resolvePackagePath = (from, dir, manifest, subpath, kind, customConditions) => {
+    const target = resolveManifestTarget(dir, manifest, subpath, kind, customConditions);
     if (!target) return;
     for (const candidate of candidates(target, from, kind)) if (snapshot.files.has(candidate)) return candidate;
   };
@@ -220926,7 +220945,7 @@ async function scan(snapshot, revision2, roots, deadline) {
     const count = spec.startsWith("@") ? 2 : 1;
     return { name: parts.slice(0, count).join("/"), subpath: parts.slice(count).join("/") };
   };
-  const resolveWorkspace = (from, spec, kind) => {
+  const resolveWorkspace = (from, spec, kind, customConditions) => {
     const { name, subpath } = packageNameAndSubpath(spec);
     if (ambiguousWorkspaces.has(name)) {
       warn("UNRESOLVED_WORKSPACE_IMPORT", from, "Duplicate workspace package name is ambiguous: " + name);
@@ -220934,14 +220953,14 @@ async function scan(snapshot, revision2, roots, deadline) {
     }
     const pkg = workspaces.get(name);
     if (!pkg) return;
-    const result = resolvePackagePath(from, pkg.dir, pkg.manifest, subpath, kind);
+    const result = resolvePackagePath(from, pkg.dir, pkg.manifest, subpath, kind, customConditions);
     if (!result) warn("UNRESOLVED_WORKSPACE_IMPORT", from, "Workspace import has no unambiguous supported " + kind + " target in its package export map: " + spec);
     return result;
   };
-  const resolveDirectoryPackage = (from, dir, kind) => {
+  const resolveDirectoryPackage = (from, dir, kind, customConditions) => {
     const manifest = packageDirs.get(dir);
     if (!manifest) return;
-    const result = resolvePackagePath(from, dir, manifest, "", kind);
+    const result = resolvePackagePath(from, dir, manifest, "", kind, customConditions);
     if (!result) warn("CONFIG_UNSUPPORTED", from, "Package entry has no unambiguous supported " + kind + " target in " + dir + "/package.json");
     return result;
   };
@@ -220950,7 +220969,7 @@ async function scan(snapshot, revision2, roots, deadline) {
       warn("UNRESOLVED_IMPORT", from, "Unsafe import path");
       return;
     }
-    const config = effectiveConfig(from);
+    const config = effectiveConfig(from), customConditions = config.moduleResolution ? config.customConditions ?? [] : [];
     const bases = [];
     let local = spec.startsWith(".");
     let alias = false;
@@ -220978,7 +220997,7 @@ async function scan(snapshot, revision2, roots, deadline) {
       const trimmed = normalized.replace(/\/+$/, ""), b = trimmed === "." ? "" : trimmed;
       if (b && !safePath(b)) continue;
       if (packageDirs.has(b)) {
-        const result = resolveDirectoryPackage(from, b, kind);
+        const result = resolveDirectoryPackage(from, b, kind, customConditions);
         if (result) return result;
         continue;
       }
@@ -220986,7 +221005,7 @@ async function scan(snapshot, revision2, roots, deadline) {
     }
     const workspaceName = packageNameAndSubpath(spec).name, knownWorkspace = workspaces.has(workspaceName);
     if (!local) {
-      const workspace = resolveWorkspace(from, spec, kind);
+      const workspace = resolveWorkspace(from, spec, kind, customConditions);
       if (workspace) return workspace;
       if (knownWorkspace) return;
     }

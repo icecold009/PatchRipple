@@ -1,6 +1,6 @@
 # Bounded real-repository samples
 
-**Collected: 2026-10-13.** This record adds three exact-revision samples to the PR #6 and `sindresorhus/p-limit#109` analyses in [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md). The three PRs were chosen as focused Python and JavaScript changes with identifiable source modules and import relationships. This is a developer-run evidence sample, not a random or representative benchmark, maintainer trial, or measure of runtime impact.
+**Collected: 2026-10-14.** This record contains five exact-revision PR samples across Flask, Packaging, Express, Click, and Vitest, in addition to the self-hosted PR #6 and `sindresorhus/p-limit#109` analyses in [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md). Four are focused importer checks; Vitest is a TypeScript monorepo stress run that reaches the configured graph caps. These developer-run samples are not a random or representative benchmark, maintainer trial, or measure of runtime impact.
 
 ## Method
 
@@ -13,14 +13,22 @@ The GitHub connector confirmed each PR's merged state, exact base and head SHAs,
 | [pallets/flask#6096](https://github.com/pallets/flask/pull/6096) | `514fc6b3e8402e4c646d5284e97a4f0ab50a7c4b` → `7203feabf723edae0286ae5dc64fec8ac4c91735` | 4 changed paths; 72 candidates, 388 edges | 588 warnings: 574 expected external imports, 10 binary exclusions, 4 dynamic/invalid-syntax warnings; incomplete, 0 omitted nodes/edges |
 | [pypa/packaging#1446](https://github.com/pypa/packaging/pull/1446) | `332d716676eb934b67ede4054a3e3e0d4022b2d3` → `a4f5d377a62e96759a4d9237256ec5dc3b19444e` | 2 changed paths; 3 candidates, 4 edges | 624 warnings: 592 expected external imports, 28 binary exclusions, 2 dynamic/invalid-syntax warnings, 2 unsupported-language warnings; incomplete, 0 omitted nodes/edges |
 | [expressjs/express#7366](https://github.com/expressjs/express/pull/7366) | `ba006766fb964571723138708eacaba0f55759cd` → `7bf8671d13b83cec863568e68989df2c2d6084cf` | 3 changed paths; 120 candidates, 242 edges | 314 warnings: 308 expected external imports, 6 dynamic/invalid-syntax warnings; incomplete, 0 omitted nodes/edges |
+| [pallets/click#3865](https://github.com/pallets/click/pull/3865) | `6d5bac5c712195cbfa9666ba0ecbf0573cdea356` → `f67c2bb6c2f055c1c7a57cd46c3697fc26a7742e` | 3 changed paths; 85 candidates, 352 edges | 601 warnings: 595 expected external imports, 4 binary exclusions, 2 dynamic/invalid-syntax warnings; incomplete, 0 omitted nodes/edges |
 
 At each PR head, independent source inspection corroborated the following direct importers. PatchRipple reported the same direct-edge counts on the base and head revisions:
 
 - **Flask:** `src/flask/app.py` had six importer files: `src/flask/__init__.py`, `src/flask/cli.py`, `src/flask/ctx.py`, `src/flask/globals.py`, `src/flask/sessions.py`, and `src/flask/testing.py`. `src/flask/testing.py` had eight: `src/flask/app.py`, `src/flask/sansio/app.py`, `tests/test_appctx.py`, `tests/test_basic.py`, `tests/test_reqctx.py`, `tests/test_request.py`, `tests/test_testing.py`, and `tests/test_views.py`.
 - **Packaging:** the changed `src/packaging/pylock.py` was imported by `tests/test_pylock.py` and `tests/test_pylock_select.py`.
 - **Express:** the changed `lib/request.js` was imported by `lib/express.js`. The public entry chain `index.js` → `lib/express.js` → `lib/request.js` was present; the changed `test/req.fresh.js` imported the public entry point.
+- **Click:** the changed `src/click/utils.py` had 12 direct file-level importer modules on both revisions. Source inspection confirmed that `src/click/core.py` imports the changed `_make_default_short_help` function and the changed `tests/test_utils/test_make_default_short_help.py` calls it through `click.utils`. The other importing modules use other names from `click.utils`; they are file-level candidates, not 12 confirmed behaviorally affected files.
 
 These checks corroborated 17 direct importer-to-changed-source relationships. The first Express run exposed a resolver defect: valid relative imports of the repository root were normalized to `./` and rejected, leaving only 8 candidates and 10 edges while reporting 192 unresolved imports. The resolver now normalizes the root to the empty repository path, consults the root package entry, and falls back to root `index.*`; a focused regression covers `../`, `../../`, package `main`, and index fallback. The rebuilt CLI then reported 120 candidates and 242 edges for the same exact revisions with no unresolved-import warnings. The graph remains incomplete because of 308 expected-external and 6 dynamic/invalid-syntax warnings. These checks do not score all candidates, establish precision/recall, or determine which files matter to a real review.
+
+## Vitest TypeScript monorepo stress sample
+
+The GitHub connector confirmed merged [vitest-dev/vitest#11218](https://github.com/vitest-dev/vitest/pull/11218), base `1c3888bcefed294af9bb8e84868f4b828ba3cf8e`, and head `dfd11728eae439fb4c130c2107733400f03f056e`. The exact head's `tsconfig.base.json` sets `moduleResolution` to `Bundler` and `customConditions` to `__vitest_source__`; workspace package export maps use that condition for checked-in source files. The initial run did not apply custom conditions and reported 888 unresolved workspace imports. After adding bounded support for explicit TypeScript custom conditions, the same exact revisions reported 830 unresolved workspace imports, 58 fewer. Warning totals changed from 4,684 to 4,626.
+
+Both reports reached the 500-node and 2,000-edge ceilings. The initial report omitted 316 nodes and 488 edges; the rerun omitted 321 nodes and 512 edges because it discovered additional source edges before reaching those caps. The graph remains incomplete and still reports 830 unresolved workspace imports, 1,590 unresolved local imports, and 6 configuration warnings. This run exposed and verifies a specific compatibility improvement; it does not score precision or recall, and the remaining limits do not establish broad monorepo accuracy. Only Git objects and manifests were read; target code, config, hooks, tests, and dependencies were not executed.
 
 ## Reproduction
 
@@ -34,4 +42,4 @@ Keep `NEW_PATH` outside `PATH`. The command reads the fetched Git objects; it do
 
 ## Evidence boundary
 
-These three samples strengthen the developer-run evidence set, but broad real-repository accuracy remains unestablished. They do not count as maintainer installation or review trials. They also provide no screen-reader, physical-device, fork-artifact, or versioned-release evidence.
+The four focused importer samples strengthen the developer-run evidence set, but broad real-repository accuracy remains unestablished. The Vitest run is a bounded scale/configuration stress sample, not a complete graph. None of these runs count as maintainer installation or review trials. They also provide no screen-reader, physical-device, fork-artifact, or versioned-release evidence.

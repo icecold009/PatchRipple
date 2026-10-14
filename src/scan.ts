@@ -8,11 +8,125 @@ declare const __ASSET_DIR__:string;
 const js=/\.[cm]?[jt]sx?$/;
 const MAX_WORKSPACE_PATTERNS=256;
 const MAX_WORKSPACE_PATTERN_LENGTH=512;
+const MAX_WORKSPACE_BRACE_ALTERNATIVES=16;
+const MAX_WORKSPACE_BRACE_EXPANSIONS=256;
 const MAX_WORKSPACE_PATH_LENGTH=4096;
 const MAX_WORKSPACE_GLOB_WORK=2_000_000;
 const MAX_EXPORTS_CONDITION_DEPTH=64;
 const MAX_EXPORTS_CONDITION_NODES=4096;
 const MAX_JS_AST_NODES=100_000;
+function withoutYamlComment(raw:string):string|undefined {
+ let quote:'"'|"'"|undefined,comment=raw.length;
+ for(let i=0;i<raw.length;i++){
+  const character=raw[i];
+  if(quote==='"'&&character==='\\'){i++;continue;}
+  if(quote==="'"&&character==="'"&&raw[i+1]==="'"){i++;continue;}
+  if(quote&&character===quote){quote=undefined;continue;}
+  if(!quote&&(character==='"'||character==="'")){quote=character;continue;}
+  if(!quote&&character==='#'&&(i===0||/\s/.test(raw[i-1]))){comment=i;break;}
+ }
+ if(quote)return;
+ return raw.slice(0,comment).trim();
+}
+function yamlWorkspaceScalar(raw:string):string|undefined {
+ const value=withoutYamlComment(raw);if(!value)return;
+ if(value.startsWith("'")){
+  if(!value.endsWith("'")||value.length<2)return;
+  let result='';
+  for(let i=1;i<value.length-1;i++){
+   if(value[i]==="'"){if(value[i+1]!=="'")return;result+="'";i++;}else result+=value[i];
+  }
+  return result;
+ }
+ if(value.startsWith('"')){try{const parsed=JSON.parse(value);return typeof parsed==='string'?parsed:undefined;}catch{return;}}
+ if('!&*|>{[`,'.includes(value[0])||/:\s/.test(value))return;
+ return value;
+}
+function yamlWorkspaceFlowSequence(raw:string):string[]|undefined {
+ const value=withoutYamlComment(raw)?.trim();if(!value||!value.startsWith('[')||!value.endsWith(']'))return;
+ const body=value.slice(1,-1);if(!body.trim())return [];
+ const result:string[]=[];let quote:'"'|"'"|undefined,start=0;
+ const push=(end:number):boolean=>{const item=yamlWorkspaceScalar(body.slice(start,end));if(item===undefined)return false;result.push(item);start=end+1;return true;};
+ for(let i=0;i<body.length;i++){
+  const character=body[i];
+  if(quote==='"'&&character==='\\'){i++;continue;}
+  if(quote==="'"&&character==="'"&&body[i+1]==="'"){i++;continue;}
+  if(quote&&character===quote){quote=undefined;continue;}
+  if(!quote&&(character==='"'||character==="'")){quote=character;continue;}
+  if(!quote&&(character==='['||character==='{'||character==='}'||character===']'))return;
+  if(!quote&&character===','&&!push(i))return;
+ }
+ if(quote||!push(body.length))return;
+ return result;
+}
+function pnpmWorkspacePatterns(text:string):{patterns:string[];error?:string} {
+ let inPackages=false,found=false,afterFlowSequence=false;const patterns:string[]=[];
+ for(const line of text.replace(/^\uFEFF/,'').split(/\r?\n/)){
+  const trimmed=line.trim();if(!trimmed||trimmed.startsWith('#'))continue;
+  if(!/^\s/.test(line)){
+   inPackages=false;afterFlowSequence=false;
+   const entry=/^packages:\s*(.*)$/.exec(line);
+   if(entry){
+    if(found)return {patterns,error:'Duplicate top-level packages key'};
+    found=true;const value=withoutYamlComment(entry[1]);if(value===undefined)return {patterns,error:'Malformed YAML packages value'};
+    if(!value){inPackages=true;continue;}
+    if(value.startsWith('[')){
+     const inline=yamlWorkspaceFlowSequence(value);if(!inline)return {patterns,error:'Inline workspace values must be a simple YAML string sequence'};
+     patterns.push(...inline);afterFlowSequence=true;continue;
+    }
+    return {patterns,error:'Workspace declarations must use a block list or a simple inline string sequence'};
+   }
+   continue;
+  }
+  if(!inPackages){if(afterFlowSequence&&/^\s+-/.test(line))return {patterns,error:'Do not mix inline and block workspace entries'};continue;}
+  const item=/^\s{2,}-\s*(.*)$/.exec(line);
+  if(!item)return {patterns,error:'Workspace entries must be simple package pattern strings'};
+  const pattern=yamlWorkspaceScalar(item[1]);
+  if(!pattern)return {patterns,error:'Workspace entry is not a supported YAML string'};
+  patterns.push(pattern);
+ }
+ if(!found)return {patterns,error:'A top-level packages list was not found'};
+ return {patterns};
+}
+function expandWorkspaceAlternatives(pattern:string):string[]|undefined {
+ const classEnd=(value:string,start:number):number=>{for(let i=start+1;i<value.length;i++){if(value[i]==='\\')return -1;if(value[i]===']')return i;}return -1;};
+ const braceEnd=(value:string,start:number):number=>{
+  let depth=0;
+  for(let i=start;i<value.length;i++){
+   if(value[i]==='['){const end=classEnd(value,i);if(end<0)return -1;i=end;continue;}
+   if(value[i]==='{')depth++;
+   else if(value[i]==='}'){depth--;if(depth===0)return i;if(depth<0)return -1;}
+  }
+  return -1;
+ };
+ const split=(value:string):string[]|undefined=>{
+  const parts:string[]=[];let depth=0,start=0,hasComma=false;
+  for(let i=0;i<value.length;i++){
+   if(value[i]==='['){const end=classEnd(value,i);if(end<0)return;i=end;continue;}
+   if(value[i]==='{')depth++;
+   else if(value[i]==='}'){depth--;if(depth<0)return;}
+   else if(value[i]===','&&depth===0){parts.push(value.slice(start,i));start=i+1;hasComma=true;}
+  }
+  if(!hasComma||depth!==0)return;
+  parts.push(value.slice(start));return parts;
+ };
+ const expand=(value:string):string[]|undefined=>{
+  let expanded=[''];
+  for(let i=0;i<value.length;i++){
+   if(value[i]==='['){const end=classEnd(value,i);if(end<0)return;const part=value.slice(i,end+1);expanded=expanded.map(prefix=>prefix+part);i=end;continue;}
+   if(value[i]==='}')return;
+   if(value[i]!=='{'){expanded=expanded.map(prefix=>prefix+value[i]);continue;}
+   const end=braceEnd(value,i);if(end<0)return;
+   const alternatives=split(value.slice(i+1,end));if(!alternatives||alternatives.length<2||alternatives.length>MAX_WORKSPACE_BRACE_ALTERNATIVES||alternatives.some(part=>!part))return;
+   const expandedAlternatives:string[]=[];
+   for(const alternative of alternatives){const items=expand(alternative);if(!items||expandedAlternatives.length+items.length>MAX_WORKSPACE_BRACE_EXPANSIONS)return;expandedAlternatives.push(...items);}
+   if(expanded.length*expandedAlternatives.length>MAX_WORKSPACE_BRACE_EXPANSIONS)return;
+   const next:string[]=[];for(const prefix of expanded)for(const alternative of expandedAlternatives)next.push(prefix+alternative);expanded=next;i=end;
+  }
+  return expanded;
+ };
+ return expand(pattern);
+}
 export interface Scan {edges:Edge[];warnings:Warning[]}
 interface Import {name:string;kind:Kind;members?:string[]}
 export function jsImports(source:string,file:string):{imports:Import[];warnings:string[]} {
@@ -69,47 +183,91 @@ export async function pythonImports(source:string):Promise<{imports:Import[];war
   }visit(tree.rootNode);return {imports,warnings};
  } finally {tree?.delete();parser.delete();}
 }
-function candidates(base:string):string[] {
- // Emitted JS paths refer to corresponding TS/TSX/declaration source candidates.
- const extension=path.posix.extname(base),stem=base.slice(0,-extension.length);
+function candidates(base:string,from:string,kind:Kind):string[] {
+ const normalizedPath=path.posix.normalize(base).replace(/\/+$/,''),normalizedBase=normalizedPath==='.'?'':normalizedPath,extension=path.posix.extname(normalizedBase),stem=normalizedBase.slice(0,-extension.length),indexBase=normalizedBase?normalizedBase+'/index':'index';
  const substitutions:Record<string,string[]>={'.js':['.ts','.tsx','.d.ts','.js'],'.jsx':['.tsx','.d.ts','.jsx'],'.mjs':['.mts','.d.mts','.mjs'],'.cjs':['.cts','.d.cts','.cjs']};
- if(substitutions[extension])return substitutions[extension].map(x=>stem+x);
- if(extension)return [base];
- return [base,...['.ts','.tsx','.d.ts','.js','.jsx'].map(x=>base+x),...['.ts','.tsx','.d.ts','.js','.jsx'].map(x=>base+'/index'+x)];
+ const declarationFile=(value:string)=>/(?:\.d|\.test-d)\.(?:ts|mts|cts)$/.test(value),javascriptImporter=/\.(?:js|jsx|mjs|cjs)$/.test(from);
+ if(substitutions[extension]){
+  const mapped=substitutions[extension].map(x=>stem+x);
+  if(declarationFile(from))return [...mapped.filter(declarationFile),...mapped.filter(x=>!declarationFile(x))];
+  if(kind==='type-only')return mapped;
+  if(javascriptImporter)return [normalizedBase,...mapped.filter(x=>x!==normalizedBase&&!declarationFile(x))];
+  return mapped.filter(x=>!declarationFile(x));
+ }
+ if(extension)return [normalizedBase];
+ if(kind==='type-only')return [normalizedBase,...['.ts','.tsx','.d.ts','.js','.jsx'].map(x=>normalizedBase+x),...['.ts','.tsx','.d.ts','.js','.jsx'].map(x=>indexBase+x)];
+ if(declarationFile(from))return [normalizedBase,...['.d.ts','.d.mts','.d.cts','.ts','.tsx','.js','.jsx'].map(x=>normalizedBase+x),...['.d.ts','.d.mts','.d.cts','.ts','.tsx','.js','.jsx'].map(x=>indexBase+x)];
+ if(javascriptImporter)return [normalizedBase,...['.js','.jsx','.mjs','.cjs','.ts','.tsx','.mts','.cts'].map(x=>normalizedBase+x),...['.js','.jsx','.mjs','.cjs','.ts','.tsx','.mts','.cts'].map(x=>indexBase+x)];
+ return [normalizedBase,...['.ts','.tsx','.js','.jsx'].map(x=>normalizedBase+x),...['.ts','.tsx','.js','.jsx'].map(x=>indexBase+x)];
 }
 export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],deadline:number):Promise<Scan>{
  const edges:Edge[]=[],warnings=[...snapshot.warnings];const edgeSet=new Set<string>();
  const warn=(code:string,p:string,detail:string)=>warnings.push({code,path:p,revision,detail});
  const add=(from:string,to:string,kind:Kind)=>{const e={from:nodeId(from),to:nodeId(to),kind,revision};const key=JSON.stringify(e);if(!edgeSet.has(key)){edgeSet.add(key);edges.push(e);}};
  type Rule={pattern:string;values:string[];base:string};
- type Config={baseUrl?:string;rules:Rule[]};
+ type Config={baseUrl?:string;moduleResolution?:'node16'|'nodenext'|'bundler';customConditions?:string[];rules:Rule[]};
  const packageFiles=[...snapshot.files].filter(([p])=>p.endsWith('/package.json')||p==='package.json');
  const packageDirs=new Map<string,Record<string,unknown>>();
  for(const [p,text] of packageFiles){try{const value=JSON.parse(text);if(!value||typeof value!=='object'||Array.isArray(value))continue;const dir=p==='package.json'?'':path.posix.dirname(p);packageDirs.set(dir,value);}catch{warn('CONFIG_UNSUPPORTED',p,'Invalid package.json; package metadata was ignored');}}
  const rootManifest=packageDirs.get('')??{};
  const workspaceObject=rootManifest.workspaces&&typeof rootManifest.workspaces==='object'&&!Array.isArray(rootManifest.workspaces)?rootManifest.workspaces as {packages?:unknown}:undefined;
  const workspaceFieldValid=Array.isArray(rootManifest.workspaces)||!!workspaceObject&&Array.isArray(workspaceObject.packages);
- const workspacesRaw=Array.isArray(rootManifest.workspaces)?rootManifest.workspaces:workspaceFieldValid?(workspaceObject!.packages as string[]):[];
+ const packageWorkspacePatterns=Array.isArray(rootManifest.workspaces)?rootManifest.workspaces:workspaceFieldValid?(workspaceObject!.packages as string[]):[];
+ let workspacesRaw:unknown[]=packageWorkspacePatterns,workspaceConfigPath='package.json';
  if(rootManifest.workspaces!==undefined&&!workspaceFieldValid)warn('CONFIG_UNSUPPORTED','package.json','Workspace declarations must be a string array or an object with a packages array');
- type WorkspacePattern={exclude:boolean;tokens:({kind:'literal';value:string}|{kind:'one'}|{kind:'star';crossesSlash:boolean})[]};
+ const pnpmWorkspace=snapshot.files.get('pnpm-workspace.yaml');
+ if(pnpmWorkspace!==undefined){
+  workspaceConfigPath='pnpm-workspace.yaml';const parsed=pnpmWorkspacePatterns(pnpmWorkspace);
+  if(parsed.error){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,parsed.error);workspacesRaw=[];}
+  else if(rootManifest.workspaces!==undefined&&workspaceFieldValid&&JSON.stringify(packageWorkspacePatterns)!==JSON.stringify(parsed.patterns)){
+   warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'pnpm-workspace.yaml and package.json declare different workspace patterns; workspace resolution was skipped');workspacesRaw=[];
+  }else workspacesRaw=parsed.patterns;
+ }
+ type WorkspaceToken={kind:'literal';value:string}|{kind:'one'}|{kind:'star';crossesSlash:boolean}|{kind:'globstar-directory'}|{kind:'class';negated:boolean;ranges:[number,number][]};
+ type WorkspacePattern={exclude:boolean;tokens:WorkspaceToken[]};
  const workspacePatterns:WorkspacePattern[]=[];
  const workspacePatternLimitExceeded=workspacesRaw.length>MAX_WORKSPACE_PATTERNS;
- if(workspacePatternLimitExceeded)warn('CONFIG_UNSUPPORTED','package.json','Workspace pattern count exceeds 256; workspace resolution was skipped');
+ let expandedWorkspacePatternCount=0,workspaceExpansionLimitExceeded=false;
+ if(workspacePatternLimitExceeded)warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Workspace pattern count exceeds 256; workspace resolution was skipped');
  if(!workspacePatternLimitExceeded)for(const raw of workspacesRaw){
-  if(typeof raw!=='string'){warn('CONFIG_UNSUPPORTED','package.json','Unsupported workspace pattern: '+String(raw));continue;}
+  if(typeof raw!=='string'){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported workspace pattern: '+String(raw));continue;}
   const exclude=raw.startsWith('!'),pattern=raw.replace(/^!/,'').replace(/^\.\//,'').replace(/\/$/,'');
-  if(pattern.includes('{')||pattern.includes('[')||pattern.includes(']')||pattern.length>MAX_WORKSPACE_PATTERN_LENGTH||!safePath(pattern.replaceAll('*','x').replaceAll('?','x'))){
-   warn('CONFIG_UNSUPPORTED','package.json','Unsupported or oversized workspace pattern: '+raw);continue;
+   const expanded=pattern.length<=MAX_WORKSPACE_PATTERN_LENGTH?expandWorkspaceAlternatives(pattern):undefined;
+   if(!expanded||expanded.some(value=>value.length>MAX_WORKSPACE_PATTERN_LENGTH||!safePath(value.replaceAll('*','x').replaceAll('?','x')))){
+    warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Unsupported or oversized workspace pattern: '+raw);continue;
+   }
+   if(expandedWorkspacePatternCount+expanded.length>MAX_WORKSPACE_PATTERNS){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Workspace pattern expansion exceeds 256; workspace resolution was skipped');workspaceExpansionLimitExceeded=true;break;}
+   expandedWorkspacePatternCount+=expanded.length;const workspacePatternStart=workspacePatterns.length;let invalidClassPattern=false;
+   for(const expandedPattern of expanded){
+    const chars=Array.from(expandedPattern),tokens:WorkspaceToken[]=[];let unsupportedClass=false;
+    for(let i=0;i<chars.length;i++){
+     if(chars[i]==='*'){
+      const crossesSlash=chars[i+1]==='*';
+      if(crossesSlash&&chars[i+2]==='/'){tokens.push({kind:'globstar-directory'});i+=2;}
+      else{tokens.push({kind:'star',crossesSlash});if(crossesSlash)i++;}
+     }
+     else if(chars[i]==='?')tokens.push({kind:'one'});
+     else if(chars[i]==='['){
+      const end=chars.indexOf(']',i+1);if(end<0){unsupportedClass=true;break;}
+      let body=chars.slice(i+1,end),negated=false;if(body[0]==='!'||body[0]==='^'){negated=true;body=body.slice(1);}
+      if(!body.length||body.some(character=>character==='/'||character==='\\'||character==='[')){unsupportedClass=true;break;}
+      const ranges:[number,number][]=[];
+      for(let j=0;j<body.length;j++){
+       const first=body[j].codePointAt(0)!;
+       if(j+2<body.length&&body[j+1]==='-'&&body[j+2]!=='-'){
+        const last=body[j+2].codePointAt(0)!;if(first>last){unsupportedClass=true;break;}ranges.push([first,last]);j+=2;
+       }else ranges.push([first,first]);
+      }
+      if(unsupportedClass)break;tokens.push({kind:'class',negated,ranges});i=end;
+     }
+     else tokens.push({kind:'literal',value:chars[i]});
+    }
+    if(unsupportedClass){warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Malformed or unsupported workspace character class: '+raw);invalidClassPattern=true;break;}
+    workspacePatterns.push({exclude,tokens});
   }
-  const chars=Array.from(pattern),tokens:WorkspacePattern['tokens']=[];
-  for(let i=0;i<chars.length;i++){
-   if(chars[i]==='*'){const crossesSlash=chars[i+1]==='*';tokens.push({kind:'star',crossesSlash});if(crossesSlash)i++;}
-   else if(chars[i]==='?')tokens.push({kind:'one'});
-   else tokens.push({kind:'literal',value:chars[i]});
-  }
-  workspacePatterns.push({exclude,tokens});
+  if(invalidClassPattern){workspacePatterns.length=workspacePatternStart;continue;}
  }
- const includePatterns=workspacePatterns.filter(pattern=>!pattern.exclude),excludePatterns=workspacePatterns.filter(pattern=>pattern.exclude);
+ const includePatterns=workspacePatternLimitExceeded||workspaceExpansionLimitExceeded?[]:workspacePatterns.filter(pattern=>!pattern.exclude),excludePatterns=workspacePatternLimitExceeded||workspaceExpansionLimitExceeded?[]:workspacePatterns.filter(pattern=>pattern.exclude);
  const workspaces=new Map<string,{dir:string;manifest:Record<string,unknown>}>();
  const ambiguousWorkspaces=new Set<string>();
  let workspaceGlobWork=0,workspaceGlobLimitExceeded=false;
@@ -120,7 +278,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
    while(pending.length){
     if(++workspaceGlobWork>MAX_WORKSPACE_GLOB_WORK){workspaceGlobLimitExceeded=true;return;}
     const state=pending.pop()!,token=pattern.tokens[state];
-    if(token?.kind==='star'&&!closed.has(state+1)){closed.add(state+1);pending.push(state+1);}
+    if((token?.kind==='star'||token?.kind==='globstar-directory')&&!closed.has(state+1)){closed.add(state+1);pending.push(state+1);}
    }
    return closed;
   };
@@ -131,7 +289,12 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
     if(++workspaceGlobWork>MAX_WORKSPACE_GLOB_WORK){workspaceGlobLimitExceeded=true;return;}
     const token=pattern.tokens[state];if(!token)continue;
     if(token.kind==='star'){if(token.crossesSlash||character!=='/')next.add(state);}
+    else if(token.kind==='globstar-directory'){next.add(state);if(character==='/')next.add(state+1);}
     else if(token.kind==='one'){if(character!=='/')next.add(state+1);}
+    else if(token.kind==='class'){
+     const point=character.codePointAt(0)!,matched=token.ranges.some(([start,end])=>point>=start&&point<=end);
+     if(character!=='/'&&(token.negated?!matched:matched))next.add(state+1);
+    }
     else if(token.value===character)next.add(state+1);
    }
    if(next.size===0)return false;
@@ -148,9 +311,9 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   if(!dir||typeof manifest.name!=='string')continue;
   const included=matchesAny(includePatterns,dir),excluded=matchesAny(excludePatterns,dir);
   if(workspaceGlobLimitExceeded)break;
-  if(included&&!excluded){if(workspaces.has(manifest.name)&&workspaces.get(manifest.name)!.dir!==dir){ambiguousWorkspaces.add(manifest.name);workspaces.delete(manifest.name);warn('CONFIG_UNSUPPORTED','package.json','Duplicate workspace package name is ambiguous: '+manifest.name);}else if(!ambiguousWorkspaces.has(manifest.name))workspaces.set(manifest.name,{dir,manifest});}
+  if(included&&!excluded){if(workspaces.has(manifest.name)&&workspaces.get(manifest.name)!.dir!==dir){ambiguousWorkspaces.add(manifest.name);workspaces.delete(manifest.name);warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Duplicate workspace package name is ambiguous: '+manifest.name);}else if(!ambiguousWorkspaces.has(manifest.name))workspaces.set(manifest.name,{dir,manifest});}
  }
- if(workspaceGlobLimitExceeded){workspaces.clear();ambiguousWorkspaces.clear();warn('CONFIG_UNSUPPORTED','package.json','Workspace glob matching exceeded its safety budget; workspace resolution was skipped');}
+ if(workspaceGlobLimitExceeded){workspaces.clear();ambiguousWorkspaces.clear();warn('CONFIG_UNSUPPORTED',workspaceConfigPath,'Workspace glob matching exceeded its safety budget; workspace resolution was skipped');}
  const configCache=new Map<string,Config>();
  const resolvingConfigs=new Set<string>();
  const configFileFor=(from:string):string|undefined=>{
@@ -168,20 +331,35 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   const text=snapshot.files.get(file),parsed=text?ts.parseConfigFileTextToJson(file,text):undefined;
   if(!parsed||parsed.error||!parsed.config||typeof parsed.config!=='object')warn('CONFIG_UNSUPPORTED',file,'Invalid TypeScript config JSON');
   else {
-   const config=parsed.config as Record<string,unknown>;const parentPaths=typeof config.extends==='string'?[config.extends]:Array.isArray(config.extends)?config.extends.filter((v):v is string=>typeof v==='string'):[];
+   const config=parsed.config as Record<string,unknown>;
+   if(config.references!==undefined&&(!Array.isArray(config.references)||config.references.length>0))warn('CONFIG_UNSUPPORTED',file,'TypeScript project references are not modeled; analysis follows source imports only');
+   const parentPaths=typeof config.extends==='string'?[config.extends]:Array.isArray(config.extends)?config.extends.filter((v):v is string=>typeof v==='string'):[];
    if(config.extends!==undefined&&(!Array.isArray(config.extends)&&typeof config.extends!=='string'||Array.isArray(config.extends)&&parentPaths.length!==config.extends.length))warn('CONFIG_UNSUPPORTED',file,'Unsupported TypeScript extends value');
    for(const parent of parentPaths){
     if(!parent.startsWith('.')||parent.includes('\\')){warn('CONFIG_UNSUPPORTED',file,'External TypeScript extends is not followed: '+parent);continue;}
     const base=path.posix.normalize(path.posix.join(path.posix.dirname(file),parent));
     if(!safePath(base)){warn('CONFIG_UNSUPPORTED',file,'Unsafe TypeScript extends path ignored');continue;}
     const candidate=snapshot.files.has(base)?base:snapshot.files.has(base+'.json')?base+'.json':snapshot.files.has(base+'/tsconfig.json')?base+'/tsconfig.json':undefined;
-    if(candidate){const inherited=resolveConfig(candidate,depth+1),merged=new Map(result.rules.map(rule=>[rule.pattern,rule]));for(const rule of inherited.rules)merged.set(rule.pattern,rule);result={baseUrl:inherited.baseUrl??result.baseUrl,rules:[...merged.values()]};}
+    if(candidate){const inherited=resolveConfig(candidate,depth+1),merged=new Map(result.rules.map(rule=>[rule.pattern,rule]));for(const rule of inherited.rules)merged.set(rule.pattern,rule);result={baseUrl:inherited.baseUrl??result.baseUrl,moduleResolution:inherited.moduleResolution??result.moduleResolution,customConditions:inherited.customConditions??result.customConditions,rules:[...merged.values()]};}
     else warn('CONFIG_UNSUPPORTED',file,'Relative TypeScript extends target was not found: '+parent);
    }
    const options=config.compilerOptions;
    if(options!==undefined&&(!options||typeof options!=='object'||Array.isArray(options)))warn('CONFIG_UNSUPPORTED',file,'compilerOptions must be an object');
    else if(options&&typeof options==='object'){
     const compiler=options as Record<string,unknown>;let ruleBase=result.baseUrl??path.posix.dirname(file);
+    if(Object.hasOwn(compiler,'moduleResolution')){
+     const resolution=typeof compiler.moduleResolution==='string'?compiler.moduleResolution.toLowerCase():'';
+     if(resolution==='node16'||resolution==='nodenext'||resolution==='bundler')result.moduleResolution=resolution;
+     else{result.moduleResolution=undefined;if(result.customConditions?.length)warn('CONFIG_UNSUPPORTED',file,'customConditions require moduleResolution node16, nodenext, or bundler');}
+    }
+    if(Object.hasOwn(compiler,'customConditions')){
+     const conditions=compiler.customConditions;
+     if(!Array.isArray(conditions)||!conditions.every(value=>typeof value==='string'&&value.length>0)){
+      result.customConditions=[];warn('CONFIG_UNSUPPORTED',file,'customConditions must be an array of non-empty strings');
+     }else if(!result.moduleResolution){
+      result.customConditions=[];warn('CONFIG_UNSUPPORTED',file,'customConditions require moduleResolution node16, nodenext, or bundler');
+     }else result.customConditions=[...conditions];
+    }
     if(typeof compiler.baseUrl==='string'){
      const next=path.posix.normalize(path.posix.join(path.posix.dirname(file),compiler.baseUrl));
      if(next===''||next==='.')result.baseUrl='';else if(safePath(next))result.baseUrl=next;else warn('CONFIG_UNSUPPORTED',file,'Unsafe baseUrl ignored');
@@ -202,7 +380,7 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   resolvingConfigs.delete(file);result.rules.sort((a,b)=>Number(a.pattern.includes('*'))-Number(b.pattern.includes('*'))||b.pattern.split('*')[0].length-a.pattern.split('*')[0].length||compare(a.pattern,b.pattern));configCache.set(file,result);return result;
  };
  const effectiveConfig=(from:string):Config=>{const file=configFileFor(from);return file?resolveConfig(file):{rules:[]};};
- const resolveManifestTarget=(dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind):string|undefined=>{
+ const resolveManifestTarget=(dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind,customConditions:readonly string[]):string|undefined=>{
   let target:string|undefined,exportMiddle='';const exportsValue=manifest.exports;
   if(exportsValue!==undefined){
    let value:unknown=exportsValue;
@@ -218,7 +396,8 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
     }else if(!subpath)value=exportsObject;
     else value=undefined;
    }else if(subpath)value=undefined;
-   const activeConditions=kind==='require'?new Set(['require','node','default']):kind==='type-only'?new Set(['types','import','node','default']):new Set(['import','node','default']);
+   const baseConditions=kind==='require'?['require','node','default']:kind==='type-only'?['types','import','node','default']:['import','node','default'];
+   const activeConditions=new Set([...baseConditions,...customConditions]);
    const pick=(root:unknown):string|undefined=>{
     const pending:{value:unknown;depth:number}[]=[{value:root,depth:0}];let visited=0;
     while(pending.length){
@@ -244,24 +423,24 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
   if(!target||!target.startsWith('./')||target.includes('\\'))return;
   const relative=path.posix.normalize(path.posix.join(dir,target.slice(2)));return safePath(relative)?relative:undefined;
  };
- const resolvePackagePath=(dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind):string|undefined=>{
-  const target=resolveManifestTarget(dir,manifest,subpath,kind);if(!target)return;
-  for(const candidate of candidates(target))if(snapshot.files.has(candidate))return candidate;
+ const resolvePackagePath=(from:string,dir:string,manifest:Record<string,unknown>,subpath:string,kind:Kind,customConditions:readonly string[]):string|undefined=>{
+  const target=resolveManifestTarget(dir,manifest,subpath,kind,customConditions);if(!target)return;
+  for(const candidate of candidates(target,from,kind))if(snapshot.files.has(candidate))return candidate;
  };
  const packageNameAndSubpath=(spec:string):{name:string;subpath:string}=>{
   const parts=spec.split('/');const count=spec.startsWith('@')?2:1;return {name:parts.slice(0,count).join('/'),subpath:parts.slice(count).join('/')};
  };
- const resolveWorkspace=(from:string,spec:string,kind:Kind):string|undefined=>{
+ const resolveWorkspace=(from:string,spec:string,kind:Kind,customConditions:readonly string[]):string|undefined=>{
   const {name,subpath}=packageNameAndSubpath(spec);if(ambiguousWorkspaces.has(name)){warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Duplicate workspace package name is ambiguous: '+name);return;}const pkg=workspaces.get(name);if(!pkg)return;
-  const result=resolvePackagePath(pkg.dir,pkg.manifest,subpath,kind);if(!result)warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Workspace import has no unambiguous supported '+kind+' target in its package export map: '+spec);return result;
+  const result=resolvePackagePath(from,pkg.dir,pkg.manifest,subpath,kind,customConditions);if(!result)warn('UNRESOLVED_WORKSPACE_IMPORT',from,'Workspace import has no unambiguous supported '+kind+' target in its package export map: '+spec);return result;
  };
- const resolveDirectoryPackage=(from:string,dir:string,kind:Kind):string|undefined=>{
+ const resolveDirectoryPackage=(from:string,dir:string,kind:Kind,customConditions:readonly string[]):string|undefined=>{
   const manifest=packageDirs.get(dir);if(!manifest)return;
-  const result=resolvePackagePath(dir,manifest,'',kind);if(!result)warn('CONFIG_UNSUPPORTED',from,'Package entry has no unambiguous supported '+kind+' target in '+dir+'/package.json');return result;
+  const result=resolvePackagePath(from,dir,manifest,'',kind,customConditions);if(!result)warn('CONFIG_UNSUPPORTED',from,'Package entry has no unambiguous supported '+kind+' target in '+dir+'/package.json');return result;
  };
  const resolveJS=(from:string,spec:string,kind:Kind):string|undefined=>{
   if(spec.includes('\\')||spec.includes('\0')){warn('UNRESOLVED_IMPORT',from,'Unsafe import path');return;}
-  const config=effectiveConfig(from);const bases:string[]=[];let local=spec.startsWith('.');let alias=false;
+  const config=effectiveConfig(from),customConditions=config.moduleResolution?config.customConditions??[]:[];const bases:string[]=[];let local=spec.startsWith('.');let alias=false;
   if(local)bases.push(path.posix.join(path.posix.dirname(from),spec));
   else {
    const matches:Rule[]=[];
@@ -270,9 +449,9 @@ export async function scan(snapshot:Snapshot,revision:Revision,roots:string[],de
    const rule=matches[0];if(rule){local=true;alias=true;const [prefix,suffix]=rule.pattern.split('*');const middle=suffix===undefined?'':spec.slice(prefix.length,spec.length-suffix.length);for(const target of rule.values)bases.push(target.replace('*',middle));}
    if(config.baseUrl!==undefined)bases.push(path.posix.join(config.baseUrl,spec));
   }
-  for(const b of bases){if(!safePath(b)&&b!=='.')continue;if(packageDirs.has(b)){const result=resolveDirectoryPackage(from,b,kind);if(result)return result;continue;}for(const c of candidates(b))if(snapshot.files.has(c))return c;}
+  for(const base of bases){const normalized=path.posix.normalize(base);if(normalized.startsWith('/'))continue;const trimmed=normalized.replace(/\/+$/,''),b=trimmed==='.'?'':trimmed;if(b&&!safePath(b))continue;if(packageDirs.has(b)){const result=resolveDirectoryPackage(from,b,kind,customConditions);if(result)return result;continue;}for(const c of candidates(b,from,kind))if(snapshot.files.has(c))return c;}
   const workspaceName=packageNameAndSubpath(spec).name,knownWorkspace=workspaces.has(workspaceName);
-  if(!local){const workspace=resolveWorkspace(from,spec,kind);if(workspace)return workspace;if(knownWorkspace)return;}
+  if(!local){const workspace=resolveWorkspace(from,spec,kind,customConditions);if(workspace)return workspace;if(knownWorkspace)return;}
   if(local||alias)warn('UNRESOLVED_IMPORT',from,'Cannot resolve local import '+spec);
   else if(!spec.startsWith('node:')&&!knownWorkspace)warn('EXPECTED_EXTERNAL_IMPORT',from,'External package is excluded from the local import graph: '+spec);
  };

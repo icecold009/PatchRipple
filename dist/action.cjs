@@ -220218,11 +220218,234 @@ var import_node_url = require("node:url");
 var js = /\.[cm]?[jt]sx?$/;
 var MAX_WORKSPACE_PATTERNS = 256;
 var MAX_WORKSPACE_PATTERN_LENGTH = 512;
+var MAX_WORKSPACE_BRACE_ALTERNATIVES = 16;
+var MAX_WORKSPACE_BRACE_EXPANSIONS = 256;
 var MAX_WORKSPACE_PATH_LENGTH = 4096;
 var MAX_WORKSPACE_GLOB_WORK = 2e6;
 var MAX_EXPORTS_CONDITION_DEPTH = 64;
 var MAX_EXPORTS_CONDITION_NODES = 4096;
 var MAX_JS_AST_NODES = 1e5;
+function withoutYamlComment(raw) {
+  let quote, comment = raw.length;
+  for (let i = 0; i < raw.length; i++) {
+    const character = raw[i];
+    if (quote === '"' && character === "\\") {
+      i++;
+      continue;
+    }
+    if (quote === "'" && character === "'" && raw[i + 1] === "'") {
+      i++;
+      continue;
+    }
+    if (quote && character === quote) {
+      quote = void 0;
+      continue;
+    }
+    if (!quote && (character === '"' || character === "'")) {
+      quote = character;
+      continue;
+    }
+    if (!quote && character === "#" && (i === 0 || /\s/.test(raw[i - 1]))) {
+      comment = i;
+      break;
+    }
+  }
+  if (quote) return;
+  return raw.slice(0, comment).trim();
+}
+function yamlWorkspaceScalar(raw) {
+  const value = withoutYamlComment(raw);
+  if (!value) return;
+  if (value.startsWith("'")) {
+    if (!value.endsWith("'") || value.length < 2) return;
+    let result = "";
+    for (let i = 1; i < value.length - 1; i++) {
+      if (value[i] === "'") {
+        if (value[i + 1] !== "'") return;
+        result += "'";
+        i++;
+      } else result += value[i];
+    }
+    return result;
+  }
+  if (value.startsWith('"')) {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === "string" ? parsed : void 0;
+    } catch {
+      return;
+    }
+  }
+  if ("!&*|>{[`,".includes(value[0]) || /:\s/.test(value)) return;
+  return value;
+}
+function yamlWorkspaceFlowSequence(raw) {
+  const value = withoutYamlComment(raw)?.trim();
+  if (!value || !value.startsWith("[") || !value.endsWith("]")) return;
+  const body2 = value.slice(1, -1);
+  if (!body2.trim()) return [];
+  const result = [];
+  let quote, start2 = 0;
+  const push = (end) => {
+    const item = yamlWorkspaceScalar(body2.slice(start2, end));
+    if (item === void 0) return false;
+    result.push(item);
+    start2 = end + 1;
+    return true;
+  };
+  for (let i = 0; i < body2.length; i++) {
+    const character = body2[i];
+    if (quote === '"' && character === "\\") {
+      i++;
+      continue;
+    }
+    if (quote === "'" && character === "'" && body2[i + 1] === "'") {
+      i++;
+      continue;
+    }
+    if (quote && character === quote) {
+      quote = void 0;
+      continue;
+    }
+    if (!quote && (character === '"' || character === "'")) {
+      quote = character;
+      continue;
+    }
+    if (!quote && (character === "[" || character === "{" || character === "}" || character === "]")) return;
+    if (!quote && character === "," && !push(i)) return;
+  }
+  if (quote || !push(body2.length)) return;
+  return result;
+}
+function pnpmWorkspacePatterns(text) {
+  let inPackages = false, found = false, afterFlowSequence = false;
+  const patterns = [];
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (!/^\s/.test(line)) {
+      inPackages = false;
+      afterFlowSequence = false;
+      const entry = /^packages:\s*(.*)$/.exec(line);
+      if (entry) {
+        if (found) return { patterns, error: "Duplicate top-level packages key" };
+        found = true;
+        const value = withoutYamlComment(entry[1]);
+        if (value === void 0) return { patterns, error: "Malformed YAML packages value" };
+        if (!value) {
+          inPackages = true;
+          continue;
+        }
+        if (value.startsWith("[")) {
+          const inline = yamlWorkspaceFlowSequence(value);
+          if (!inline) return { patterns, error: "Inline workspace values must be a simple YAML string sequence" };
+          patterns.push(...inline);
+          afterFlowSequence = true;
+          continue;
+        }
+        return { patterns, error: "Workspace declarations must use a block list or a simple inline string sequence" };
+      }
+      continue;
+    }
+    if (!inPackages) {
+      if (afterFlowSequence && /^\s+-/.test(line)) return { patterns, error: "Do not mix inline and block workspace entries" };
+      continue;
+    }
+    const item = /^\s{2,}-\s*(.*)$/.exec(line);
+    if (!item) return { patterns, error: "Workspace entries must be simple package pattern strings" };
+    const pattern = yamlWorkspaceScalar(item[1]);
+    if (!pattern) return { patterns, error: "Workspace entry is not a supported YAML string" };
+    patterns.push(pattern);
+  }
+  if (!found) return { patterns, error: "A top-level packages list was not found" };
+  return { patterns };
+}
+function expandWorkspaceAlternatives(pattern) {
+  const classEnd = (value, start2) => {
+    for (let i = start2 + 1; i < value.length; i++) {
+      if (value[i] === "\\") return -1;
+      if (value[i] === "]") return i;
+    }
+    return -1;
+  };
+  const braceEnd = (value, start2) => {
+    let depth = 0;
+    for (let i = start2; i < value.length; i++) {
+      if (value[i] === "[") {
+        const end = classEnd(value, i);
+        if (end < 0) return -1;
+        i = end;
+        continue;
+      }
+      if (value[i] === "{") depth++;
+      else if (value[i] === "}") {
+        depth--;
+        if (depth === 0) return i;
+        if (depth < 0) return -1;
+      }
+    }
+    return -1;
+  };
+  const split = (value) => {
+    const parts = [];
+    let depth = 0, start2 = 0, hasComma = false;
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] === "[") {
+        const end = classEnd(value, i);
+        if (end < 0) return;
+        i = end;
+        continue;
+      }
+      if (value[i] === "{") depth++;
+      else if (value[i] === "}") {
+        depth--;
+        if (depth < 0) return;
+      } else if (value[i] === "," && depth === 0) {
+        parts.push(value.slice(start2, i));
+        start2 = i + 1;
+        hasComma = true;
+      }
+    }
+    if (!hasComma || depth !== 0) return;
+    parts.push(value.slice(start2));
+    return parts;
+  };
+  const expand = (value) => {
+    let expanded = [""];
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] === "[") {
+        const end2 = classEnd(value, i);
+        if (end2 < 0) return;
+        const part = value.slice(i, end2 + 1);
+        expanded = expanded.map((prefix) => prefix + part);
+        i = end2;
+        continue;
+      }
+      if (value[i] === "}") return;
+      if (value[i] !== "{") {
+        expanded = expanded.map((prefix) => prefix + value[i]);
+        continue;
+      }
+      const end = braceEnd(value, i);
+      if (end < 0) return;
+      const alternatives = split(value.slice(i + 1, end));
+      if (!alternatives || alternatives.length < 2 || alternatives.length > MAX_WORKSPACE_BRACE_ALTERNATIVES || alternatives.some((part) => !part)) return;
+      const expandedAlternatives = [];
+      for (const alternative of alternatives) {
+        const items = expand(alternative);
+        if (!items || expandedAlternatives.length + items.length > MAX_WORKSPACE_BRACE_EXPANSIONS) return;
+        expandedAlternatives.push(...items);
+      }
+      if (expanded.length * expandedAlternatives.length > MAX_WORKSPACE_BRACE_EXPANSIONS) return;
+      const next = [];
+      for (const prefix of expanded) for (const alternative of expandedAlternatives) next.push(prefix + alternative);
+      expanded = next;
+      i = end;
+    }
+    return expanded;
+  };
+  return expand(pattern);
+}
 function jsImports(source, file) {
   const imports = [], warnings = [];
   let sf;
@@ -220325,12 +220548,22 @@ async function pythonImports(source) {
     parser.delete();
   }
 }
-function candidates(base) {
-  const extension = import_node_path.default.posix.extname(base), stem = base.slice(0, -extension.length);
+function candidates(base, from, kind) {
+  const normalizedPath = import_node_path.default.posix.normalize(base).replace(/\/+$/, ""), normalizedBase = normalizedPath === "." ? "" : normalizedPath, extension = import_node_path.default.posix.extname(normalizedBase), stem = normalizedBase.slice(0, -extension.length), indexBase = normalizedBase ? normalizedBase + "/index" : "index";
   const substitutions = { ".js": [".ts", ".tsx", ".d.ts", ".js"], ".jsx": [".tsx", ".d.ts", ".jsx"], ".mjs": [".mts", ".d.mts", ".mjs"], ".cjs": [".cts", ".d.cts", ".cjs"] };
-  if (substitutions[extension]) return substitutions[extension].map((x) => stem + x);
-  if (extension) return [base];
-  return [base, ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => base + x), ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => base + "/index" + x)];
+  const declarationFile = (value) => /(?:\.d|\.test-d)\.(?:ts|mts|cts)$/.test(value), javascriptImporter = /\.(?:js|jsx|mjs|cjs)$/.test(from);
+  if (substitutions[extension]) {
+    const mapped = substitutions[extension].map((x) => stem + x);
+    if (declarationFile(from)) return [...mapped.filter(declarationFile), ...mapped.filter((x) => !declarationFile(x))];
+    if (kind === "type-only") return mapped;
+    if (javascriptImporter) return [normalizedBase, ...mapped.filter((x) => x !== normalizedBase && !declarationFile(x))];
+    return mapped.filter((x) => !declarationFile(x));
+  }
+  if (extension) return [normalizedBase];
+  if (kind === "type-only") return [normalizedBase, ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => normalizedBase + x), ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((x) => indexBase + x)];
+  if (declarationFile(from)) return [normalizedBase, ...[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".js", ".jsx"].map((x) => normalizedBase + x), ...[".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".js", ".jsx"].map((x) => indexBase + x)];
+  if (javascriptImporter) return [normalizedBase, ...[".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"].map((x) => normalizedBase + x), ...[".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"].map((x) => indexBase + x)];
+  return [normalizedBase, ...[".ts", ".tsx", ".js", ".jsx"].map((x) => normalizedBase + x), ...[".ts", ".tsx", ".js", ".jsx"].map((x) => indexBase + x)];
 }
 async function scan(snapshot, revision2, roots, deadline) {
   const edges = [], warnings = [...snapshot.warnings];
@@ -220359,33 +220592,104 @@ async function scan(snapshot, revision2, roots, deadline) {
   const rootManifest = packageDirs.get("") ?? {};
   const workspaceObject = rootManifest.workspaces && typeof rootManifest.workspaces === "object" && !Array.isArray(rootManifest.workspaces) ? rootManifest.workspaces : void 0;
   const workspaceFieldValid = Array.isArray(rootManifest.workspaces) || !!workspaceObject && Array.isArray(workspaceObject.packages);
-  const workspacesRaw = Array.isArray(rootManifest.workspaces) ? rootManifest.workspaces : workspaceFieldValid ? workspaceObject.packages : [];
+  const packageWorkspacePatterns = Array.isArray(rootManifest.workspaces) ? rootManifest.workspaces : workspaceFieldValid ? workspaceObject.packages : [];
+  let workspacesRaw = packageWorkspacePatterns, workspaceConfigPath = "package.json";
   if (rootManifest.workspaces !== void 0 && !workspaceFieldValid) warn("CONFIG_UNSUPPORTED", "package.json", "Workspace declarations must be a string array or an object with a packages array");
+  const pnpmWorkspace = snapshot.files.get("pnpm-workspace.yaml");
+  if (pnpmWorkspace !== void 0) {
+    workspaceConfigPath = "pnpm-workspace.yaml";
+    const parsed = pnpmWorkspacePatterns(pnpmWorkspace);
+    if (parsed.error) {
+      warn("CONFIG_UNSUPPORTED", workspaceConfigPath, parsed.error);
+      workspacesRaw = [];
+    } else if (rootManifest.workspaces !== void 0 && workspaceFieldValid && JSON.stringify(packageWorkspacePatterns) !== JSON.stringify(parsed.patterns)) {
+      warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "pnpm-workspace.yaml and package.json declare different workspace patterns; workspace resolution was skipped");
+      workspacesRaw = [];
+    } else workspacesRaw = parsed.patterns;
+  }
   const workspacePatterns = [];
   const workspacePatternLimitExceeded = workspacesRaw.length > MAX_WORKSPACE_PATTERNS;
-  if (workspacePatternLimitExceeded) warn("CONFIG_UNSUPPORTED", "package.json", "Workspace pattern count exceeds 256; workspace resolution was skipped");
+  let expandedWorkspacePatternCount = 0, workspaceExpansionLimitExceeded = false;
+  if (workspacePatternLimitExceeded) warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Workspace pattern count exceeds 256; workspace resolution was skipped");
   if (!workspacePatternLimitExceeded) for (const raw of workspacesRaw) {
     if (typeof raw !== "string") {
-      warn("CONFIG_UNSUPPORTED", "package.json", "Unsupported workspace pattern: " + String(raw));
+      warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Unsupported workspace pattern: " + String(raw));
       continue;
     }
     const exclude = raw.startsWith("!"), pattern = raw.replace(/^!/, "").replace(/^\.\//, "").replace(/\/$/, "");
-    if (pattern.includes("{") || pattern.includes("[") || pattern.includes("]") || pattern.length > MAX_WORKSPACE_PATTERN_LENGTH || !safePath(pattern.replaceAll("*", "x").replaceAll("?", "x"))) {
-      warn("CONFIG_UNSUPPORTED", "package.json", "Unsupported or oversized workspace pattern: " + raw);
+    const expanded = pattern.length <= MAX_WORKSPACE_PATTERN_LENGTH ? expandWorkspaceAlternatives(pattern) : void 0;
+    if (!expanded || expanded.some((value) => value.length > MAX_WORKSPACE_PATTERN_LENGTH || !safePath(value.replaceAll("*", "x").replaceAll("?", "x")))) {
+      warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Unsupported or oversized workspace pattern: " + raw);
       continue;
     }
-    const chars = Array.from(pattern), tokens = [];
-    for (let i = 0; i < chars.length; i++) {
-      if (chars[i] === "*") {
-        const crossesSlash = chars[i + 1] === "*";
-        tokens.push({ kind: "star", crossesSlash });
-        if (crossesSlash) i++;
-      } else if (chars[i] === "?") tokens.push({ kind: "one" });
-      else tokens.push({ kind: "literal", value: chars[i] });
+    if (expandedWorkspacePatternCount + expanded.length > MAX_WORKSPACE_PATTERNS) {
+      warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Workspace pattern expansion exceeds 256; workspace resolution was skipped");
+      workspaceExpansionLimitExceeded = true;
+      break;
     }
-    workspacePatterns.push({ exclude, tokens });
+    expandedWorkspacePatternCount += expanded.length;
+    const workspacePatternStart = workspacePatterns.length;
+    let invalidClassPattern = false;
+    for (const expandedPattern of expanded) {
+      const chars = Array.from(expandedPattern), tokens = [];
+      let unsupportedClass = false;
+      for (let i = 0; i < chars.length; i++) {
+        if (chars[i] === "*") {
+          const crossesSlash = chars[i + 1] === "*";
+          if (crossesSlash && chars[i + 2] === "/") {
+            tokens.push({ kind: "globstar-directory" });
+            i += 2;
+          } else {
+            tokens.push({ kind: "star", crossesSlash });
+            if (crossesSlash) i++;
+          }
+        } else if (chars[i] === "?") tokens.push({ kind: "one" });
+        else if (chars[i] === "[") {
+          const end = chars.indexOf("]", i + 1);
+          if (end < 0) {
+            unsupportedClass = true;
+            break;
+          }
+          let body2 = chars.slice(i + 1, end), negated = false;
+          if (body2[0] === "!" || body2[0] === "^") {
+            negated = true;
+            body2 = body2.slice(1);
+          }
+          if (!body2.length || body2.some((character) => character === "/" || character === "\\" || character === "[")) {
+            unsupportedClass = true;
+            break;
+          }
+          const ranges = [];
+          for (let j = 0; j < body2.length; j++) {
+            const first = body2[j].codePointAt(0);
+            if (j + 2 < body2.length && body2[j + 1] === "-" && body2[j + 2] !== "-") {
+              const last = body2[j + 2].codePointAt(0);
+              if (first > last) {
+                unsupportedClass = true;
+                break;
+              }
+              ranges.push([first, last]);
+              j += 2;
+            } else ranges.push([first, first]);
+          }
+          if (unsupportedClass) break;
+          tokens.push({ kind: "class", negated, ranges });
+          i = end;
+        } else tokens.push({ kind: "literal", value: chars[i] });
+      }
+      if (unsupportedClass) {
+        warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Malformed or unsupported workspace character class: " + raw);
+        invalidClassPattern = true;
+        break;
+      }
+      workspacePatterns.push({ exclude, tokens });
+    }
+    if (invalidClassPattern) {
+      workspacePatterns.length = workspacePatternStart;
+      continue;
+    }
   }
-  const includePatterns = workspacePatterns.filter((pattern) => !pattern.exclude), excludePatterns = workspacePatterns.filter((pattern) => pattern.exclude);
+  const includePatterns = workspacePatternLimitExceeded || workspaceExpansionLimitExceeded ? [] : workspacePatterns.filter((pattern) => !pattern.exclude), excludePatterns = workspacePatternLimitExceeded || workspaceExpansionLimitExceeded ? [] : workspacePatterns.filter((pattern) => pattern.exclude);
   const workspaces = /* @__PURE__ */ new Map();
   const ambiguousWorkspaces = /* @__PURE__ */ new Set();
   let workspaceGlobWork = 0, workspaceGlobLimitExceeded = false;
@@ -220402,7 +220706,7 @@ async function scan(snapshot, revision2, roots, deadline) {
           return;
         }
         const state = pending.pop(), token = pattern.tokens[state];
-        if (token?.kind === "star" && !closed.has(state + 1)) {
+        if ((token?.kind === "star" || token?.kind === "globstar-directory") && !closed.has(state + 1)) {
           closed.add(state + 1);
           pending.push(state + 1);
         }
@@ -220422,8 +220726,14 @@ async function scan(snapshot, revision2, roots, deadline) {
         if (!token) continue;
         if (token.kind === "star") {
           if (token.crossesSlash || character !== "/") next.add(state);
+        } else if (token.kind === "globstar-directory") {
+          next.add(state);
+          if (character === "/") next.add(state + 1);
         } else if (token.kind === "one") {
           if (character !== "/") next.add(state + 1);
+        } else if (token.kind === "class") {
+          const point = character.codePointAt(0), matched = token.ranges.some(([start2, end]) => point >= start2 && point <= end);
+          if (character !== "/" && (token.negated ? !matched : matched)) next.add(state + 1);
         } else if (token.value === character) next.add(state + 1);
       }
       if (next.size === 0) return false;
@@ -220449,14 +220759,14 @@ async function scan(snapshot, revision2, roots, deadline) {
       if (workspaces.has(manifest.name) && workspaces.get(manifest.name).dir !== dir) {
         ambiguousWorkspaces.add(manifest.name);
         workspaces.delete(manifest.name);
-        warn("CONFIG_UNSUPPORTED", "package.json", "Duplicate workspace package name is ambiguous: " + manifest.name);
+        warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Duplicate workspace package name is ambiguous: " + manifest.name);
       } else if (!ambiguousWorkspaces.has(manifest.name)) workspaces.set(manifest.name, { dir, manifest });
     }
   }
   if (workspaceGlobLimitExceeded) {
     workspaces.clear();
     ambiguousWorkspaces.clear();
-    warn("CONFIG_UNSUPPORTED", "package.json", "Workspace glob matching exceeded its safety budget; workspace resolution was skipped");
+    warn("CONFIG_UNSUPPORTED", workspaceConfigPath, "Workspace glob matching exceeded its safety budget; workspace resolution was skipped");
   }
   const configCache = /* @__PURE__ */ new Map();
   const resolvingConfigs = /* @__PURE__ */ new Set();
@@ -220484,6 +220794,7 @@ async function scan(snapshot, revision2, roots, deadline) {
     if (!parsed || parsed.error || !parsed.config || typeof parsed.config !== "object") warn("CONFIG_UNSUPPORTED", file, "Invalid TypeScript config JSON");
     else {
       const config = parsed.config;
+      if (config.references !== void 0 && (!Array.isArray(config.references) || config.references.length > 0)) warn("CONFIG_UNSUPPORTED", file, "TypeScript project references are not modeled; analysis follows source imports only");
       const parentPaths = typeof config.extends === "string" ? [config.extends] : Array.isArray(config.extends) ? config.extends.filter((v) => typeof v === "string") : [];
       if (config.extends !== void 0 && (!Array.isArray(config.extends) && typeof config.extends !== "string" || Array.isArray(config.extends) && parentPaths.length !== config.extends.length)) warn("CONFIG_UNSUPPORTED", file, "Unsupported TypeScript extends value");
       for (const parent of parentPaths) {
@@ -220500,7 +220811,7 @@ async function scan(snapshot, revision2, roots, deadline) {
         if (candidate) {
           const inherited = resolveConfig(candidate, depth + 1), merged = new Map(result.rules.map((rule) => [rule.pattern, rule]));
           for (const rule of inherited.rules) merged.set(rule.pattern, rule);
-          result = { baseUrl: inherited.baseUrl ?? result.baseUrl, rules: [...merged.values()] };
+          result = { baseUrl: inherited.baseUrl ?? result.baseUrl, moduleResolution: inherited.moduleResolution ?? result.moduleResolution, customConditions: inherited.customConditions ?? result.customConditions, rules: [...merged.values()] };
         } else warn("CONFIG_UNSUPPORTED", file, "Relative TypeScript extends target was not found: " + parent);
       }
       const options = config.compilerOptions;
@@ -220508,6 +220819,24 @@ async function scan(snapshot, revision2, roots, deadline) {
       else if (options && typeof options === "object") {
         const compiler = options;
         let ruleBase = result.baseUrl ?? import_node_path.default.posix.dirname(file);
+        if (Object.hasOwn(compiler, "moduleResolution")) {
+          const resolution = typeof compiler.moduleResolution === "string" ? compiler.moduleResolution.toLowerCase() : "";
+          if (resolution === "node16" || resolution === "nodenext" || resolution === "bundler") result.moduleResolution = resolution;
+          else {
+            result.moduleResolution = void 0;
+            if (result.customConditions?.length) warn("CONFIG_UNSUPPORTED", file, "customConditions require moduleResolution node16, nodenext, or bundler");
+          }
+        }
+        if (Object.hasOwn(compiler, "customConditions")) {
+          const conditions = compiler.customConditions;
+          if (!Array.isArray(conditions) || !conditions.every((value) => typeof value === "string" && value.length > 0)) {
+            result.customConditions = [];
+            warn("CONFIG_UNSUPPORTED", file, "customConditions must be an array of non-empty strings");
+          } else if (!result.moduleResolution) {
+            result.customConditions = [];
+            warn("CONFIG_UNSUPPORTED", file, "customConditions require moduleResolution node16, nodenext, or bundler");
+          } else result.customConditions = [...conditions];
+        }
         if (typeof compiler.baseUrl === "string") {
           const next = import_node_path.default.posix.normalize(import_node_path.default.posix.join(import_node_path.default.posix.dirname(file), compiler.baseUrl));
           if (next === "" || next === ".") result.baseUrl = "";
@@ -220539,7 +220868,7 @@ async function scan(snapshot, revision2, roots, deadline) {
     const file = configFileFor(from);
     return file ? resolveConfig(file) : { rules: [] };
   };
-  const resolveManifestTarget = (dir, manifest, subpath, kind) => {
+  const resolveManifestTarget = (dir, manifest, subpath, kind, customConditions) => {
     let target, exportMiddle = "";
     const exportsValue = manifest.exports;
     if (exportsValue !== void 0) {
@@ -220562,7 +220891,8 @@ async function scan(snapshot, revision2, roots, deadline) {
         } else if (!subpath) value = exportsObject;
         else value = void 0;
       } else if (subpath) value = void 0;
-      const activeConditions = kind === "require" ? /* @__PURE__ */ new Set(["require", "node", "default"]) : kind === "type-only" ? /* @__PURE__ */ new Set(["types", "import", "node", "default"]) : /* @__PURE__ */ new Set(["import", "node", "default"]);
+      const baseConditions = kind === "require" ? ["require", "node", "default"] : kind === "type-only" ? ["types", "import", "node", "default"] : ["import", "node", "default"];
+      const activeConditions = /* @__PURE__ */ new Set([...baseConditions, ...customConditions]);
       const pick = (root) => {
         const pending = [{ value: root, depth: 0 }];
         let visited = 0;
@@ -220605,17 +220935,17 @@ async function scan(snapshot, revision2, roots, deadline) {
     const relative = import_node_path.default.posix.normalize(import_node_path.default.posix.join(dir, target.slice(2)));
     return safePath(relative) ? relative : void 0;
   };
-  const resolvePackagePath = (dir, manifest, subpath, kind) => {
-    const target = resolveManifestTarget(dir, manifest, subpath, kind);
+  const resolvePackagePath = (from, dir, manifest, subpath, kind, customConditions) => {
+    const target = resolveManifestTarget(dir, manifest, subpath, kind, customConditions);
     if (!target) return;
-    for (const candidate of candidates(target)) if (snapshot.files.has(candidate)) return candidate;
+    for (const candidate of candidates(target, from, kind)) if (snapshot.files.has(candidate)) return candidate;
   };
   const packageNameAndSubpath = (spec) => {
     const parts = spec.split("/");
     const count = spec.startsWith("@") ? 2 : 1;
     return { name: parts.slice(0, count).join("/"), subpath: parts.slice(count).join("/") };
   };
-  const resolveWorkspace = (from, spec, kind) => {
+  const resolveWorkspace = (from, spec, kind, customConditions) => {
     const { name, subpath } = packageNameAndSubpath(spec);
     if (ambiguousWorkspaces.has(name)) {
       warn("UNRESOLVED_WORKSPACE_IMPORT", from, "Duplicate workspace package name is ambiguous: " + name);
@@ -220623,14 +220953,14 @@ async function scan(snapshot, revision2, roots, deadline) {
     }
     const pkg = workspaces.get(name);
     if (!pkg) return;
-    const result = resolvePackagePath(pkg.dir, pkg.manifest, subpath, kind);
+    const result = resolvePackagePath(from, pkg.dir, pkg.manifest, subpath, kind, customConditions);
     if (!result) warn("UNRESOLVED_WORKSPACE_IMPORT", from, "Workspace import has no unambiguous supported " + kind + " target in its package export map: " + spec);
     return result;
   };
-  const resolveDirectoryPackage = (from, dir, kind) => {
+  const resolveDirectoryPackage = (from, dir, kind, customConditions) => {
     const manifest = packageDirs.get(dir);
     if (!manifest) return;
-    const result = resolvePackagePath(dir, manifest, "", kind);
+    const result = resolvePackagePath(from, dir, manifest, "", kind, customConditions);
     if (!result) warn("CONFIG_UNSUPPORTED", from, "Package entry has no unambiguous supported " + kind + " target in " + dir + "/package.json");
     return result;
   };
@@ -220639,7 +220969,7 @@ async function scan(snapshot, revision2, roots, deadline) {
       warn("UNRESOLVED_IMPORT", from, "Unsafe import path");
       return;
     }
-    const config = effectiveConfig(from);
+    const config = effectiveConfig(from), customConditions = config.moduleResolution ? config.customConditions ?? [] : [];
     const bases = [];
     let local = spec.startsWith(".");
     let alias = false;
@@ -220661,18 +220991,21 @@ async function scan(snapshot, revision2, roots, deadline) {
       }
       if (config.baseUrl !== void 0) bases.push(import_node_path.default.posix.join(config.baseUrl, spec));
     }
-    for (const b of bases) {
-      if (!safePath(b) && b !== ".") continue;
+    for (const base of bases) {
+      const normalized = import_node_path.default.posix.normalize(base);
+      if (normalized.startsWith("/")) continue;
+      const trimmed = normalized.replace(/\/+$/, ""), b = trimmed === "." ? "" : trimmed;
+      if (b && !safePath(b)) continue;
       if (packageDirs.has(b)) {
-        const result = resolveDirectoryPackage(from, b, kind);
+        const result = resolveDirectoryPackage(from, b, kind, customConditions);
         if (result) return result;
         continue;
       }
-      for (const c of candidates(b)) if (snapshot.files.has(c)) return c;
+      for (const c of candidates(b, from, kind)) if (snapshot.files.has(c)) return c;
     }
     const workspaceName = packageNameAndSubpath(spec).name, knownWorkspace = workspaces.has(workspaceName);
     if (!local) {
-      const workspace = resolveWorkspace(from, spec, kind);
+      const workspace = resolveWorkspace(from, spec, kind, customConditions);
       if (workspace) return workspace;
       if (knownWorkspace) return;
     }
@@ -220983,7 +221316,7 @@ var import_node_path3 = __toESM(require("node:path"), 1);
 // src/viewer-style.ts
 var viewerStyle = `
 :root{color-scheme:light;--bg:#f4f6f8;--panel:#fff;--inset:#f8fafc;--line:#dbe2ea;--muted:#657487;--text:#1f2937;--accent:#315e91;--amber:#8a6000;--blue:#3f679a;--accent-soft:#edf4fb;--accent-border:#aec3dc;--positive-soft:#edf5f1;--warning-soft:#fff6df;--warning-line:#e8cd8d;--head-edge:#526b8a;--base-edge:#8491a3;--font-sans:Inter,"Segoe UI Variable","Segoe UI",ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,sans-serif;--font-mono:"Cascadia Code","SFMono-Regular",ui-monospace,Consolas,"Liberation Mono",monospace}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 var(--font-sans)}button,input,select{font:inherit}a{color:var(--accent);text-underline-offset:4px}button,a,input,select,summary{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{cursor:default;opacity:.45}:focus-visible{outline:2px solid var(--accent);outline-offset:4px}[hidden]{display:none!important}.skip{position:absolute;left:20px;top:-100px;background:var(--accent);color:var(--bg);padding:10px;z-index:5}.skip:focus{top:12px}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 var(--font-sans)}button,input,select{font:inherit}a{color:var(--accent);text-underline-offset:4px}button,a,input,select,summary{-webkit-tap-highlight-color:transparent}button{cursor:pointer}button:disabled{cursor:default;opacity:.45}:focus-visible{outline:2px solid var(--accent);outline-offset:4px}[hidden]{display:none!important}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.skip{position:absolute;left:20px;top:-100px;background:var(--accent);color:var(--bg);padding:10px;z-index:5}.skip:focus{top:12px}
 .topbar{border-bottom:1px solid var(--line);padding:18px max(24px,calc((100vw - 1440px)/2));display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:-.3px;font-size:18px}.brand-mark{width:29px;height:29px;border:1px solid var(--accent-border);border-radius:9px;display:grid;place-items:center;color:var(--accent);font-size:18px;background:var(--accent-soft)}.top-meta{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px}.status{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border:1px solid var(--accent-border);background:var(--accent-soft);border-radius:6px;color:var(--accent);font-size:12px}.status:before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}.status.incomplete{color:var(--amber);background:var(--warning-soft);border-color:var(--warning-line)}
 main{max-width:1440px;margin:auto;padding:32px 28px 24px}.eyebrow{margin:0 0 7px;color:var(--muted);font-size:11px;font-weight:600;letter-spacing:1.3px;text-transform:uppercase}h1{font-size:clamp(30px,4vw,44px);font-weight:550;letter-spacing:-1.8px;line-height:1.15;margin:0 0 10px}h2,h3,p{margin-top:0}.intro{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:24px}.intro-copy>p:last-child{color:var(--muted);margin-bottom:0;max-width:660px}.revision{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);text-align:right}.revision span{display:block;color:var(--muted);font:11px system-ui;margin-bottom:4px}.revision code{background:var(--panel);border:1px solid var(--line);padding:5px 8px;border-radius:5px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:22px;overflow:hidden}.stat{padding:17px 22px;border-right:1px solid var(--line)}.stat:last-child{border:0}.stat-label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px}.dot{height:7px;width:7px;border-radius:2px;background:var(--muted);display:inline-block;flex:none}.dot.changed{background:var(--amber)}.dot.impact{background:var(--accent)}.dot.test{background:var(--blue)}.stat strong{display:block;font-size:28px;line-height:1.4;font-weight:550;letter-spacing:-1px}.stat small{color:var(--muted);font-size:11px}.workspace{display:grid;grid-template-columns:minmax(0,1fr) 330px;align-items:start;gap:18px}.maincol{min-width:0;display:grid;gap:18px}.panel{border:1px solid var(--line);border-radius:10px;background:var(--panel);min-width:0;overflow:hidden}.panel-head{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:14px}.panel-head h2{font-size:14px;font-weight:600;margin:0;letter-spacing:-.2px}.panel-head p{font-size:11px;color:var(--muted);margin:4px 0 0}.pill{border:1px solid var(--line);border-radius:5px;padding:3px 7px;font-size:11px;color:var(--muted);white-space:nowrap}.legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted);padding:12px 20px;border-bottom:1px solid var(--line)}.legend span{display:inline-flex;align-items:center;gap:6px}.edge-key{width:19px;height:1px;background:var(--head-edge)}.edge-key.base{background:var(--base-edge)}.graph-scroll{overflow:auto;max-height:420px;background-color:var(--inset);background-image:radial-gradient(#e7ecf2 1px,transparent 1px);background-size:18px 18px;padding:6px}.graph-scroll svg{display:block;width:100%;min-width:780px;height:auto}.graph-node{cursor:pointer}.graph-node rect{fill:var(--inset);stroke:var(--line);stroke-width:1}.graph-node[data-role=changed] rect{fill:var(--warning-soft);stroke:#d1ad60}.graph-node[data-role=test] rect{fill:#eef3fa;stroke:#a9bad1}.graph-node[aria-pressed=true] rect{stroke:var(--accent);stroke-width:2.5}.graph-node:focus{outline:none}.graph-node:focus-visible rect{stroke:var(--text);stroke-width:3}.graph-note{padding:10px 20px;margin:0;color:var(--muted);font-size:11px;border-top:1px solid var(--line)}.graph-empty{text-align:center;padding:50px 20px;color:var(--muted)}
 .filters{padding:15px 20px;display:grid;grid-template-columns:minmax(160px,1fr) 115px 145px auto;gap:10px;border-bottom:1px solid var(--line)}.field{display:grid;gap:5px;min-width:0}.field>span{font-size:11px;color:var(--muted)}input,select{width:100%;min-width:0;border:1px solid var(--line);border-radius:6px;background:var(--inset);color:var(--text);height:37px;padding:7px 10px}input::placeholder{color:var(--muted)}input:focus,select:focus{border-color:var(--accent)}.reset{align-self:end;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--text);padding:8px 11px;height:37px}.list-meta{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;font-size:11px;color:var(--muted)}#count{margin:0}.list-meta span{font-family:var(--font-mono)}#files{list-style:none;margin:0;padding:0 9px 9px;max-height:440px;overflow:auto}.file-row{border:1px solid transparent;border-radius:7px;margin:3px 0;padding:12px 11px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}.file-row[data-selected=true]{background:var(--accent-soft);border-color:var(--accent-border)}.file-main{min-width:0}.file-main button{display:block;border:0;background:none;color:var(--text);text-align:left;padding:0;max-width:100%;font:13px/1.4 var(--font-mono);overflow-wrap:anywhere}.file-main button .basename{font-weight:600}.directory{display:block;font-size:11px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.row-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:10px;justify-content:flex-end}.badge{display:inline-flex;border-radius:4px;padding:3px 7px;background:var(--positive-soft);color:#256550;font-size:10px;font-weight:550}.badge.changed{color:var(--amber);background:var(--warning-soft)}.badge.impact{color:var(--accent);background:var(--positive-soft)}.badge.test{color:var(--blue);background:#eaf1fb}.row-link{font-size:11px;margin-left:8px}.relationship-summary{display:none}.empty{padding:34px 20px;text-align:center;color:var(--muted)}.empty strong{display:block;color:var(--text);margin-bottom:6px}.empty p{margin:0;font-size:12px}
@@ -221006,8 +221339,8 @@ main{max-width:1440px;margin:auto;padding:32px 28px 24px}.eyebrow{margin:0 0 7px
 
 // src/viewer-client.ts
 var viewerScript = `
-const search=document.getElementById('search'),role=document.getElementById('role'),owner=document.getElementById('owner'),packageFilter=document.getElementById('package-filter'),reset=document.getElementById('reset'),files=[...document.querySelectorAll('#files>li.file-row')],groupHeadings=[...document.querySelectorAll('#files>.file-group-heading')],detail=document.getElementById('detail'),inspectorSummary=document.getElementById('inspector-summary'),inspector=document.getElementById('inspector'),count=document.getElementById('count'),empty=document.getElementById('empty'),mapSvg=document.getElementById('map-svg'),mapNote=document.getElementById('graph-note'),mapData=document.getElementById('map-data'),revisionFilter=document.getElementById('revision-filter'),edgeFilter=document.getElementById('edge-filter'),depthControl=document.getElementById('graph-depth'),warningLink=document.getElementById('warning-link'),audit=document.getElementById('analysis-details'),backToFiles=document.getElementById('back-to-files'),explorer=document.getElementById('explorer');
-const graph=mapData?JSON.parse(mapData.dataset.graph):{nodes:[],edges:[]},byPath=new Map(graph.nodes.map(n=>[n.path,n])),NS='http://www.w3.org/2000/svg',MAX_NODES=18;let selected=null;
+const search=document.getElementById('search'),role=document.getElementById('role'),owner=document.getElementById('owner'),packageFilter=document.getElementById('package-filter'),reset=document.getElementById('reset'),files=[...document.querySelectorAll('#files>li.file-row')],groupHeadings=[...document.querySelectorAll('#files>.file-group-heading')],detail=document.getElementById('detail'),selectionStatus=document.getElementById('selection-status'),inspectorSummary=document.getElementById('inspector-summary'),inspector=document.getElementById('inspector'),count=document.getElementById('count'),empty=document.getElementById('empty'),mapSvg=document.getElementById('map-svg'),mapNote=document.getElementById('graph-note'),mapData=document.getElementById('map-data'),revisionFilter=document.getElementById('revision-filter'),edgeFilter=document.getElementById('edge-filter'),depthControl=document.getElementById('graph-depth'),warningLink=document.getElementById('warning-link'),audit=document.getElementById('analysis-details'),backToFiles=document.getElementById('back-to-files'),explorer=document.getElementById('explorer');
+const graph=mapData?JSON.parse(mapData.dataset.graph):{nodes:[],edges:[]},byPath=new Map(graph.nodes.map(n=>[n.path,n])),NS='http://www.w3.org/2000/svg',MAX_NODES=18;let selected=null,interactiveReady=false;
 function element(tag,text,className){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;}
 function svgElement(tag,attrs={},text){const node=document.createElementNS(NS,tag);for(const [key,value] of Object.entries(attrs))node.setAttribute(key,String(value));if(text!==undefined)node.textContent=text;return node;}
 function section(title,items,fallback,collapsible=false){const s=element('section',undefined,'detail-section');s.append(element('h3',title));if(items.length){const ul=element('ul');for(const item of items)ul.append(element('li',item));if(collapsible){const details=element('details',undefined,'detail-disclosure'),summary=element('summary','Show all '+items.length+' items');details.append(summary,ul);s.append(details);}else s.append(ul);}else s.append(element('p',fallback,'subtle'));detail.append(s);}
@@ -221030,6 +221363,7 @@ function renderMap(){
 function sourceSection(links){const s=element('section',undefined,'detail-section');s.append(element('h3','Exact revision source'));if(links.length){const list=element('div',undefined,'source-links');for(const item of links){const a=element('a',item.label,'source-button');a.href=item.href;a.rel='noreferrer';a.target='_blank';list.append(a);}s.append(list);}else s.append(element('p','No source revision is available for this candidate.','subtle'));detail.append(s);}
 function selectFile(li,focus=false){
  selected=li;for(const row of files){row.dataset.selected=String(row===li);row.querySelector('button').setAttribute('aria-pressed',String(row===li));}
+ if(interactiveReady&&selectionStatus)selectionStatus.textContent=li?'Selected file '+li.dataset.path+'. File inspector updated.':'No file selected. File inspector updated.';
  detail.replaceChildren();if(inspectorSummary)inspectorSummary.textContent=li?li.dataset.change+' \xB7 '+li.dataset.path:'Revision-specific evidence';
  if(!li){detail.append(element('p','FILE INSPECTOR','eyebrow'),element('h2',files.length?'No matching files':'No changed files'),element('p',files.length?'Clear or adjust your filters to explore the comparison.':'This comparison has no file candidates. Revision and analysis details remain available below.','detail-help'));renderMap();return;}
  detail.append(element('p','SELECTED FILE','eyebrow'),element('h2',li.dataset.path));const badges=element('div',undefined,'detail-badges');for(const r of li.dataset.roles.split(','))badges.append(element('span',r,'badge '+r));badges.append(element('span',li.dataset.change,'badge change-status'));detail.append(badges);
@@ -221056,7 +221390,7 @@ if(warningLink&&audit)warningLink.addEventListener('click',()=>{audit.open=true;
 if(backToFiles)backToFiles.addEventListener('click',()=>{const target=selected&&!selected.hidden?selected.querySelector('button'):search;if(inspector&&window.matchMedia('(max-width: 760px)').matches)inspector.open=false;explorer.scrollIntoView({block:'start'});if(target){target.focus({preventScroll:true});target.scrollIntoView({block:'center'});}});
 document.addEventListener('keydown',event=>{if(event.key==='/'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.target.isContentEditable&&!['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName)){event.preventDefault();search.focus();}});
 if(inspector&&window.matchMedia('(max-width: 760px)').matches)inspector.open=false;
-filter();selectFile(files.find(li=>li.dataset.roles.split(',').includes('changed'))||files[0]||null);
+filter();selectFile(files.find(li=>li.dataset.roles.split(',').includes('changed'))||files[0]||null);interactiveReady=true;
 `;
 
 // src/viewer.ts
@@ -221152,9 +221486,9 @@ function html(graph) {
   const groupOptions = [...new Set(graph.nodes.map((n) => groupFor(n.path)))].sort(compare).map((group) => "<option>" + escapeHTML(group) + "</option>").join("");
   const graphPanel = '<section class="panel graph-panel" aria-labelledby="map"><div class="panel-head"><div><h2 id="map">Import neighborhood</h2><p>Search keeps nearby chain context visible; context nodes are muted.</p></div><span class="pill">' + graph.edges.length + ' revision edges</span></div><div class="graph-controls"><label class="field"><span>Revision</span><select id="revision-filter" aria-label="Revision"><option value="both">Base + head</option><option value="base">Base only</option><option value="head">Head only</option></select></label><label class="field"><span>Edge kind</span><select id="edge-filter" aria-label="Edge kind"><option value="all">Runtime + type-only</option><option value="runtime">Runtime imports</option><option value="type-only">Type-only imports</option></select></label><label class="field"><span>Neighborhood depth</span><select id="graph-depth" aria-label="Neighborhood depth"><option value="0">Selected files</option><option value="1">1 hop</option><option value="2" selected>2 hops</option><option value="3">3 hops</option><option value="4">4 hops</option></select></label></div><div class="legend"><span><i class="dot changed" aria-hidden="true"></i>Changed</span><span><i class="dot impact" aria-hidden="true"></i>Dependent</span><span><i class="dot test" aria-hidden="true"></i>Test</span><span><i class="edge-key base" aria-hidden="true"></i>Base dashed</span><span><i class="edge-key" aria-hidden="true"></i>Head solid</span><span><i class="edge-key type-only" aria-hidden="true"></i>Type-only dotted</span></div><div class="graph-scroll"><div id="map-data" hidden data-graph="' + mapData + '"></div>' + (graph.nodes.length ? svg(graph) : '<p class="graph-empty">No candidate files in this comparison.</p>') + '</div><p class="graph-note" id="graph-note" aria-live="polite">Arrows point from importers to dependencies. The diagram is capped at 18 nodes; the file list retains every candidate.</p></section>';
   const explorer = '<section class="panel explorer" id="explorer" aria-labelledby="list"><div class="panel-head"><div><h2 id="list">Explore files</h2><p>Files are grouped by package or top-level directory. The complete candidate list remains available.</p></div><span class="pill">' + graph.nodes.length + ' candidates</span></div><div class="filters"><label class="field search-field"><span>Find a file</span><input id="search" type="search" placeholder="Search a path\u2026" autocomplete="off"></label><label class="field"><span>Role</span><select id="role" aria-label="Role"><option value="">All roles</option><option>changed</option><option>impact</option><option>test</option></select></label><label class="field"><span>Owner</span><select id="owner" aria-label="Owner"><option value="">All owners</option>' + owners.map((o) => "<option>" + escapeHTML(o) + "</option>").join("") + '</select></label><label class="field"><span>Package group</span><select id="package-filter" aria-label="Package group"><option value="">All groups</option>' + groupOptions + '</select></label><button type="button" class="reset" id="reset">Clear filters</button></div><div class="list-meta"><p id="count" role="status"></p><span>/ to search</span></div><div class="empty" id="empty" hidden><strong>' + (graph.nodes.length ? "No matching files" : "No candidate files") + "</strong><p>" + (graph.nodes.length ? "Try another path, role, owner, or package group." : "The comparison produced no file candidates.") + '</p></div><ul id="files">' + rows + "</ul></section>";
-  const inspector = '<details class="panel inspector" id="inspector" open><summary class="panel-head"><div><h2>File inspector</h2><p id="inspector-summary">Revision-specific evidence</p></div><span class="pill">Evidence</span></summary><div id="detail" tabindex="-1" aria-label="Selected file details"><p class="detail-help">Select a file to inspect its roles, revisions, owners, and test evidence.</p></div><div class="detail-tip"><button type="button" class="back-to-files" id="back-to-files">Back to files \u2191</button><a href="' + escapeHTML(graph.repository.url + "/compare/" + graph.change.analysisBaseSha + "..." + graph.change.headSha) + '" target="_blank" rel="noreferrer">Compare revisions on GitHub \u2197</a><span>Source links open the exact analyzed revision.</span></div></details>';
+  const inspector = '<details class="panel inspector" id="inspector" open><summary class="panel-head"><div><h2>File inspector</h2><p id="inspector-summary">Revision-specific evidence</p></div><span class="pill">Evidence</span></summary><div id="detail" tabindex="-1" role="region" aria-label="Selected file details"><p class="detail-help">Select a file to inspect its roles, revisions, owners, and test evidence.</p></div><div class="detail-tip"><button type="button" class="back-to-files" id="back-to-files">Back to files \u2191</button><a href="' + escapeHTML(graph.repository.url + "/compare/" + graph.change.analysisBaseSha + "..." + graph.change.headSha) + '" target="_blank" rel="noreferrer">Compare revisions on GitHub \u2197</a><span>Source links open the exact analyzed revision.</span></div></details>';
   const audit = '<details class="panel audit" id="analysis-details"' + (!complete || graph.warnings.length ? " open" : "") + "><summary>Warnings &amp; analysis details \xB7 " + graph.warnings.length + ' warnings</summary><div class="audit-body"><p>' + graph.completeness.omittedNodes + " omitted nodes \xB7 " + graph.completeness.omittedEdges + " omitted edges. " + (complete ? "Complete within supported static syntax." : "Incomplete analysis \u2014 review omissions and warnings.") + '</p><div class="warnings" id="warning-list" tabindex="-1" aria-label="Warnings grouped by severity and category">' + (warningGroups || "<p>No analysis warnings reported.</p>") + '</div><details class="revision-details"><summary>Revision attribution</summary><pre>Base tip: ' + graph.change.baseTipSha + "\nAnalysis base: " + graph.change.analysisBaseSha + "\nHead: " + graph.change.headSha + "\nMode: " + graph.change.mode + '</pre></details><details class="revision-details"><summary>All changed paths, including omitted candidates</summary><ul>' + graph.changes.map((c) => "<li>" + c.status + " " + escapeHTML(c.oldPath ?? c.newPath ?? "") + (c.status === "R" ? " \u2192 " + escapeHTML(c.newPath) : "") + "</li>").join("") + "</ul></details></div></details>";
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-' + hash(viewerScript) + "&#39;; style-src &#39;sha256-" + hash(viewerStyle) + '&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;; connect-src &#39;none&#39;"><title>PatchRipple \xB7 ' + escapeHTML(graph.repository.name) + "</title><style>" + viewerStyle + '</style></head><body><a class="skip" href="#explorer">Skip to files</a><div class="topbar"><div class="brand"><span class="brand-mark" aria-hidden="true">\u21B3</span>PatchRipple</div><div class="top-meta"><span>Repo-local analysis</span><span class="pill">Offline report</span><span class="status ' + (complete ? "" : "incomplete") + '">' + (complete ? "Complete within scope" : "Incomplete analysis") + '</span></div></div><main><header class="intro"><div class="intro-copy"><p class="eyebrow">' + escapeHTML(graph.repository.name) + (graph.change.pullRequest ? " / PR #" + graph.change.pullRequest : " / Comparison") + '</p><h1>See the ripple.</h1><p>A closer look at changed files, potential dependents, and the evidence connecting them.</p></div><div class="revision"><span>' + (graph.change.mode === "pr" ? "Merge-base comparison" : "Direct comparison") + "</span><code>" + graph.change.analysisBaseSha.slice(0, 7) + "</code> \u2192 <code>" + graph.change.headSha.slice(0, 7) + '</code></div></header><section class="stats" aria-label="Comparison summary">' + stats + '</section><div class="workspace"><div class="maincol">' + graphPanel + explorer + "</div>" + inspector + "</div>" + audit + '<div class="scope-note"><span aria-hidden="true">\u24D8</span><p>Static candidates are possibilities, not runtime effects, test coverage, or proof that a change is safe. Review the evidence alongside the diff.</p></div><footer><span>PatchRipple \xB7 Built for a closer review.</span><span>Generated repo-locally. No source execution or network assets.</span></footer></main><script>' + viewerScript + "</script></body></html>";
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-' + hash(viewerScript) + "&#39;; style-src &#39;sha256-" + hash(viewerStyle) + '&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;; connect-src &#39;none&#39;"><title>PatchRipple \xB7 ' + escapeHTML(graph.repository.name) + "</title><style>" + viewerStyle + '</style></head><body><a class="skip" href="#explorer">Skip to files</a><div class="topbar"><div class="brand"><span class="brand-mark" aria-hidden="true">\u21B3</span>PatchRipple</div><div class="top-meta"><span>Repo-local analysis</span><span class="pill">Offline report</span><span class="status ' + (complete ? "" : "incomplete") + '">' + (complete ? "Complete within scope" : "Incomplete analysis") + '</span></div></div><main><header class="intro"><div class="intro-copy"><p class="eyebrow">' + escapeHTML(graph.repository.name) + (graph.change.pullRequest ? " / PR #" + graph.change.pullRequest : " / Comparison") + '</p><h1>See the ripple.</h1><p>A closer look at changed files, potential dependents, and the evidence connecting them.</p></div><div class="revision"><span>' + (graph.change.mode === "pr" ? "Merge-base comparison" : "Direct comparison") + "</span><code>" + graph.change.analysisBaseSha.slice(0, 7) + "</code> \u2192 <code>" + graph.change.headSha.slice(0, 7) + '</code></div></header><section class="stats" aria-label="Comparison summary">' + stats + '</section><div id="selection-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div><div class="workspace"><div class="maincol">' + graphPanel + explorer + "</div>" + inspector + "</div>" + audit + '<div class="scope-note"><span aria-hidden="true">\u24D8</span><p>Static candidates are possibilities, not runtime effects, test coverage, or proof that a change is safe. Review the evidence alongside the diff.</p></div><footer><span>PatchRipple \xB7 Built for a closer review.</span><span>Generated repo-locally. No source execution or network assets.</span></footer></main><script>' + viewerScript + "</script></body></html>";
 }
 
 // src/render.ts

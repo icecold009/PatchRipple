@@ -1,7 +1,13 @@
 import {spawnSync} from 'node:child_process';
 import {realpathSync} from 'node:fs';
-import {Graph,Limits,Change,Warning,Revision,safePath} from './model.js';
+import {Graph,Limits,Change,Warning,Revision,safePath,defaultLimits} from './model.js';
 export interface Snapshot {files:Map<string,string>;paths:Set<string>;warnings:Warning[]}
+function gitEnvironment(allowedProtocol?:string):NodeJS.ProcessEnv {
+ const env:NodeJS.ProcessEnv={...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_OPTIONAL_LOCKS:'0'};
+ for(const k of Object.keys(env))if((k.startsWith('GIT_CONFIG_')&&!['GIT_CONFIG_NOSYSTEM','GIT_CONFIG_GLOBAL'].includes(k))||['GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES','GIT_COMMON_DIR','GIT_QUARANTINE_PATH'].includes(k))delete env[k];
+ if(allowedProtocol)env.GIT_ALLOW_PROTOCOL=allowedProtocol;
+ return env;
+}
 export class GitReader {
  readonly root:string; readonly deadline:number;
  constructor(repo:string,readonly limits:Limits){this.root=realpathSync(repo);this.deadline=Date.now()+limits.timeoutMs;this.run(['rev-parse','--show-toplevel']);}
@@ -56,4 +62,20 @@ export class GitReader {
   }
   return {files,paths,warnings};
  }
+}
+export interface FetchedPullRequestRefs {repository:string;baseBranch:string;pullRequest:number;baseRef:string;headRef:string;baseSha:string;headSha:string}
+export function fetchPullRequestRefs(repo:string,repository:string,baseBranch:string,pullRequest:number):FetchedPullRequestRefs {
+ if(!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repository)||repository.split('/').some(x=>x==='.'||x==='..'))throw new Error('Repository must be a public GitHub slug in OWNER/REPO form');
+ if(!Number.isSafeInteger(pullRequest)||pullRequest<1)throw new Error('Pull request number must be a positive integer');
+ if(!baseBranch||baseBranch.startsWith('-')||/[\0\r\n]/.test(baseBranch))throw new Error('Invalid base branch');
+ const reader=new GitReader(repo,defaultLimits),root=reader.root;
+ try{reader.run(['check-ref-format','refs/heads/'+baseBranch]);}catch{throw new Error('Invalid base branch name');}
+ const env=gitEnvironment('https');
+ const rewrites=spawnSync('git',['--no-replace-objects','-C',root,'config','--local','--get-regexp','^url\\..*\\.insteadof$'],{encoding:'utf8',env,timeout:10000,maxBuffer:1024*1024,windowsHide:true});
+ if(rewrites.status===0)throw new Error('Local Git URL rewrite rules are configured; remove them before using fetch-pr');
+ if(rewrites.status!==1)throw new Error('Could not safely inspect local Git URL configuration');
+ const baseRef='refs/patchripple/manual/base',headRef='refs/patchripple/manual/head',url='https://github.com/'+repository+'.git',prRef='refs/pull/'+pullRequest+'/head';
+ const result=spawnSync('git',['--no-replace-objects','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-c','credential.helper=','-c','http.extraHeader=','-c','http.sslVerify=true','-c','http.followRedirects=false','-C',root,'fetch','--atomic','--no-tags','--no-recurse-submodules','--no-write-fetch-head',url,'+refs/heads/'+baseBranch+':'+baseRef,'+'+prRef+':'+headRef],{encoding:'utf8',env,timeout:15*60*1000,maxBuffer:4*1024*1024,windowsHide:true});
+ if(result.error||result.status!==0)throw new Error('GitHub fetch failed; verify the public repository, base branch, and PR number. No target files or scripts are run.');
+ return {repository,baseBranch,pullRequest,baseRef,headRef,baseSha:reader.ref(baseRef),headSha:reader.ref(headRef)};
 }

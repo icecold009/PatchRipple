@@ -17,8 +17,9 @@ PatchRipple reads exact Git revisions and maps changed files to potential import
 - Adds related-test hints and uses CODEOWNERS from the base revision.
 - Produces an offline HTML report, JSON graph, SVG map, and metadata file.
 - Shows uncertainty, warnings, and analysis limits instead of presenting guesses as proof.
+- Keeps file selection inspectable from the file list or graph and announces selection changes with an accessible status message.
 
-The CLI and Action read repository data and create the report in the environment where you run them. They do not execute code, configuration, or hooks from the repository being analyzed, and they do not install its dependencies.
+The analyzer and Action read repository data and create the report in the environment where you run them. The explicit `fetch-pr` command retrieves only a public GitHub base branch and PR head into PatchRipple-owned refs. These commands do not execute code, configuration, or hooks from the repository being analyzed, and they do not install its dependencies.
 
 ## Try the demo
 
@@ -26,21 +27,36 @@ The animated preview above and the [clickable walkthrough](docs/demo/walkthrough
 
 ## Quick start
 
-Use Node.js 24 or newer, Git, a trusted PatchRipple checkout, and exact base and head commits available in the target repository. The bundled CLI is `dist/cli.cjs`; no PatchRipple dependency installation is needed inside the target repository.
+Use Node.js 24 or newer and npm. This snapshot has no versioned GitHub release or tag, and the public npm registry has no `patchripple` package. To install the current PR #7 code-bearing candidate from its immutable HTTPS archive, without cloning Git:
+
+~~~sh
+npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/d12fd77960e72112832aedd139a8b51cde00d058.tar.gz"
+patchripple --version
+~~~
+
+The pinned code-bearing commit `d12fd77960e72112832aedd139a8b51cde00d058` adds explicit TypeScript `customConditions` support and passed local lint, typecheck, all 64 tests, build, package smoke, generated-file consistency, exact-head hosted [Trusted CI #82](https://github.com/icecold009/PatchRipple/actions/runs/38538870223), and [Static PR impact #32](https://github.com/icecold009/PatchRipple/actions/runs/38538870203). CI #82 includes generated browser fixtures and Chromium, Firefox, and WebKit checks. Its full-SHA archive installed into an isolated npm prefix; `patchripple --version` and `--help` succeeded. PR #7 remains an open draft; this candidate is not merged or a versioned release. The merged `main` pin is `4b45616e941ebe349b845a62a8941c586fbb18c5`. Review [release evidence](docs/RELEASE_EVIDENCE.md) before choosing a source revision.
+
+For a public GitHub PR whose exact commits are missing from the target clone, fetch the base branch and PR head into PatchRipple-owned refs:
+
+~~~sh
+patchripple fetch-pr --repo /path/to/target --repository OWNER/REPOSITORY --base-branch main --pr 123
+~~~
+
+Replace the repository, base branch, and PR number with the public PR's values. The command uses HTTPS, rejects local Git URL rewrites, disables credential helpers, hooks, tags, and recursive submodules, and atomically updates only `refs/patchripple/manual/base` and `refs/patchripple/manual/head`. It downloads Git objects but leaves the checked-out branch and working tree untouched. It does not support private repositories.
 
 First check that the revisions and output path are usable:
 
 ~~~sh
-node /path/to/PatchRipple/dist/cli.cjs doctor --repo /path/to/target --base BASE_SHA --head HEAD_SHA --out /path/to/new-report
+patchripple doctor --repo /path/to/target --base refs/patchripple/manual/base --head refs/patchripple/manual/head --out /path/to/new-report
 ~~~
 
 Then generate the report in that same new path:
 
 ~~~sh
-node /path/to/PatchRipple/dist/cli.cjs analyze --repo /path/to/target --base BASE_SHA --head HEAD_SHA --repository https://github.com/OWNER/REPOSITORY --out /path/to/new-report
+patchripple analyze --repo /path/to/target --base refs/patchripple/manual/base --head refs/patchripple/manual/head --repository https://github.com/OWNER/REPOSITORY --out /path/to/new-report
 ~~~
 
-`doctor` is read-only and creates no files, so its output path can be reused by `analyze`. The output directory must be new and outside the target repository; existing paths are refused. PatchRipple does not fetch missing Git history. If a revision is unavailable, fetch it yourself and rerun the diagnostic.
+`doctor` creates no files, so its output path can be reused by `analyze`. The output directory must be new and outside the target repository; existing paths are refused. In a shallow clone, deepen or unshallow the requested history if `doctor` cannot find the merge base. `doctor` itself remains read-only; `fetch-pr` writes the two namespaced refs and fetched objects.
 
 PR mode is the default: it compares `merge-base(base, head)` to `head`. Use `--mode direct` to compare exactly the two supplied revisions.
 
@@ -63,12 +79,14 @@ An exit code of `0` means a valid report was produced, possibly with visible unc
 
 | Area | Evidence PatchRipple can report |
 | --- | --- |
-| JavaScript and TypeScript | Literal imports and re-exports, type-only imports, literal dynamic imports, and `require`; relative paths, supported nested TypeScript path aliases, and declared workspace package entries |
+| JavaScript and TypeScript | Literal imports and re-exports, type-only imports, literal dynamic imports, and `require`; relative paths, supported nested TypeScript path aliases, and declared npm/Yarn/pnpm workspace package entries |
 | Python | Static `import` and `from` relationships, relative imports, package initializers, and configured source roots |
 | Tests | Likely related test files based on import relationships and adjacent or naming conventions; these are heuristics, not test-coverage results |
 | CODEOWNERS | Matches from base-revision precedence (.github/CODEOWNERS, root CODEOWNERS, then docs/CODEOWNERS); the last matching supported rule wins |
 
 Dynamic import expressions, wildcard or unresolved Python imports, unresolved local paths, unsupported configuration or syntax, parser uncertainty, symlinks, submodules, and resource limits can produce warnings or omissions. Expected external package imports remain visible as exclusions; by themselves, they do not make the graph incomplete.
+
+Workspace discovery reads `package.json` `workspaces` arrays or `{ "packages": [...] }` objects. It also reads block lists and simple inline string sequences under the top-level `packages` key in `pnpm-workspace.yaml`, including quoted include and `!` exclude patterns. Workspace globs support `*`, `**`, `?`, character classes with ranges and negation, and nested comma-brace alternatives with 2–16 nonempty alternatives per group and at most 256 expansions per declaration. `**/` matches zero or more directory levels. Complex YAML, flow objects, malformed classes or brace groups, groups with more than 16 alternatives, declarations exceeding the expansion cap, and conflicting declarations are reported as unsupported. TypeScript alias inheritance follows relative config files included in the analyzed Git snapshot. Explicit `compilerOptions.customConditions` are applied to package `exports` when `moduleResolution` is set or inherited as `node16`, `nodenext`, or `bundler`; inferred module-resolution defaults and package `imports` fields such as `#internal` are not resolved. Package-based or external `tsconfig` extends and project-reference build semantics are not executed or inferred; non-empty project references produce an explicit incomplete-analysis warning.
 
 Supported CODEOWNERS patterns include directory patterns, `*`, `**`, and `?`, with user, team, or email owners. Unsupported patterns warn; team membership is not looked up.
 

@@ -13,14 +13,14 @@ try{
  const url=pathToFileURL(path.resolve(process.env.PATCHRIPPLE_DEMO_PATH||'docs/demo/index.html')).href;await page.goto(url);
  assert.match(await page.title(),/PatchRipple/);assert.equal(await page.locator('h1').textContent(),'See the ripple.');
  assert.equal(await page.locator('main').count(),1);for(const label of ['Find a file','Role','Owner','Package group','Revision','Edge kind','Neighborhood depth'])assert.equal(await page.getByLabel(label,{exact:true}).count(),1,'labeled control: '+label);
- assert.equal(await page.locator('#map-svg[role="group"][aria-label]').count(),1);assert.equal(await page.locator('#count[role="status"]').count(),1);assert.equal(await page.locator('#graph-note').getAttribute('aria-live'),'polite');assert.equal(await page.locator('[id]').evaluateAll(nodes=>new Set(nodes.map(n=>n.id)).size),await page.locator('[id]').count());
+ assert.equal(await page.locator('#map-svg[role="group"][aria-label]').count(),1);assert.equal(await page.locator('#detail[role="region"][aria-label="Selected file details"]').count(),1);assert.equal(await page.getByRole('region',{name:'Selected file details'}).count(),1);assert.equal(await page.locator('#selection-status[role="status"][aria-live="polite"][aria-atomic="true"]').count(),1);assert.equal(await page.getByRole('status').count(),2);assert.equal(await page.locator('#count[role="status"]').count(),1);assert.equal(await page.locator('#graph-note').getAttribute('aria-live'),'polite');assert.equal(await page.locator('[id]').evaluateAll(nodes=>new Set(nodes.map(n=>n.id)).size),await page.locator('[id]').count());
  assert.equal(await page.locator('#count').textContent(),'4 files shown');
  assert.ok(await page.locator('.warnings').isVisible());assert.match(await page.locator('.warnings').textContent(),/SYNTHETIC_DEMO/);
  await page.locator('.warning-group').first().evaluate(group=>{group.open=false;});await page.getByRole('button',{name:/Analysis warnings/}).click();assert.ok(await page.locator('.warning').first().evaluate(el=>el.closest('details.warning-group')?.open));assert.ok(await page.locator('.warning').first().evaluate(el=>el===document.activeElement));
  if(process.env.PATCHRIPPLE_VISUAL_DIR){await mkdir(process.env.PATCHRIPPLE_VISUAL_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.PATCHRIPPLE_VISUAL_DIR,'desktop.png'),fullPage:true});}
- await page.getByLabel('Find a file').fill('core.test');assert.equal(await page.locator('#count').textContent(),'1 file shown');
+ await page.getByLabel('Find a file').fill('core.test');assert.equal(await page.locator('#count').textContent(),'1 file shown');assert.equal(await page.locator('#selection-status').textContent(),'Selected file src/core.test.ts. File inspector updated.');assert.equal(await page.getByRole('status').filter({hasText:'Selected file src/core.test.ts. File inspector updated.'}).count(),1);
  const button=page.getByRole('button',{name:'src/core.test.ts',exact:true});await button.focus();await page.keyboard.press('Enter');
- assert.equal(await page.locator('#detail h2').textContent(),'src/core.test.ts');assert.ok(await page.locator('#detail').evaluate(el=>el===document.activeElement));
+ assert.equal(await page.locator('#detail h2').textContent(),'src/core.test.ts');assert.ok(await page.locator('#detail').evaluate(el=>el===document.activeElement));assert.equal(await page.locator('#selection-status').textContent(),'Selected file src/core.test.ts. File inspector updated.');
  assert.match(await page.locator('#detail').textContent(),/Imports the changed core module/);
  await page.getByLabel('Find a file').fill('');
  await page.locator('#files>li[data-path="src/ui.ts"] button').click();
@@ -33,7 +33,7 @@ try{
  for(const activation of ['click','Enter','Space']){
   await page.locator('#files>li[data-path="src/ui.ts"] button').click();
   if(activation==='click')await contextNode.click();else{await contextNode.focus();await page.keyboard.press(activation);}
-  assert.equal(await page.locator('#detail h2').textContent(),'src/core.ts');
+  assert.equal(await page.locator('#detail h2').textContent(),'src/core.ts');assert.equal(await page.locator('#selection-status').textContent(),'Selected file src/core.ts. File inspector updated.');assert.equal(await page.getByRole('status').filter({hasText:'Selected file src/core.ts. File inspector updated.'}).count(),1);
   assert.equal(await contextNode.getAttribute('aria-pressed'),'true');
   assert.equal(await page.getByLabel('Find a file').inputValue(),'ui.ts');
   assert.equal(await page.locator('#count').textContent(),'1 file shown');
@@ -76,14 +76,14 @@ try{
    await page.goto(pathToFileURL(path.join(process.env.PATCHRIPPLE_EDGE_FIXTURES,name+'.html')).href);
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
    if(name==='empty'){assert.equal(await page.locator('#count').textContent(),'0 files shown');assert.ok(await page.locator('#empty').isVisible());}
-   if(name==='large'){assert.equal(await page.locator('#count').textContent(),'85 files shown');assert.ok(await page.locator('svg [data-node]').count()<=18);await page.getByLabel('Package group',{exact:true}).selectOption('src');assert.equal(await page.locator('#count').textContent(),'84 files shown');await page.getByLabel('Package group',{exact:true}).selectOption('');await page.locator('#files>li.file-row[data-path="zz-deep-dependent.ts"] button').click();assert.equal(await page.locator('#detail h2').textContent(),'zz-deep-dependent.ts');assert.ok(await page.locator('svg [data-node="file:zz-deep-dependent.ts"]').count());assert.match(await page.locator('#detail').textContent(),/src\/changed.ts.*src\/related\/081.ts.*src\/related\/082.ts.*zz-deep-dependent.ts/s);assert.match(await page.locator('.graph-note').textContent(),/Focused on zz-deep-dependent.ts/);await page.getByLabel('Neighborhood depth',{exact:true}).selectOption('3');assert.ok(await page.locator('svg [data-node="file:src/changed.ts"]').count());}
+   if(name==='large'){assert.equal(await page.locator('#count').textContent(),'85 files shown');assert.ok(await page.locator('svg [data-node]').count()<=18);await page.getByLabel('Package group',{exact:true}).selectOption('src');assert.equal(await page.locator('#count').textContent(),'84 files shown');await page.getByLabel('Package group',{exact:true}).selectOption('');await page.locator('#files>li.file-row[data-path="zz-deep-dependent.ts"] button').click();assert.equal(await page.locator('#detail h2').textContent(),'zz-deep-dependent.ts');assert.equal(await page.locator('#selection-status').textContent(),'Selected file zz-deep-dependent.ts. File inspector updated.');assert.ok(await page.locator('svg [data-node="file:zz-deep-dependent.ts"]').count());assert.match(await page.locator('#detail').textContent(),/src\/changed.ts.*src\/related\/081.ts.*src\/related\/082.ts.*zz-deep-dependent.ts/s);assert.match(await page.locator('.graph-note').textContent(),/Focused on zz-deep-dependent.ts/);await page.getByLabel('Neighborhood depth',{exact:true}).selectOption('3');assert.ok(await page.locator('svg [data-node="file:src/changed.ts"]').count());}
    if(name==='incomplete'){assert.ok(await page.getByText('Incomplete analysis',{exact:true}).isVisible());assert.equal(await page.locator('.audit').getAttribute('open'),'');assert.match(await page.locator('.audit-body').textContent(),/omitted nodes/);assert.equal(await page.locator('.warning').getAttribute('data-category'),'resource-limit');}
    if(name==='large'){
     // A late match must remain selected in the capped graph at both widths.
     for(const width of [1280,320]){
      await page.setViewportSize({width,height:800});
      await page.getByLabel('Find a file').fill('src/related/');
-     await page.locator('#files>li.file-row[data-path="src/related/082.ts"] button').click();
+     await page.locator('#files>li.file-row[data-path="src/related/082.ts"] button').click();assert.equal(await page.locator('#selection-status').textContent(),'Selected file src/related/082.ts. File inspector updated.');
      assert.equal(await page.locator('#detail h2').textContent(),'src/related/082.ts');
      assert.equal(await page.locator('svg [data-node="file:src/related/082.ts"]').getAttribute('aria-pressed'),'true');
      assert.ok(await page.locator('svg [data-node]').count()<=18);
@@ -95,7 +95,7 @@ try{
  }
  if(!process.env.PATCHRIPPLE_DEMO_PATH){const readme=await readFile(path.resolve('README.md'),'utf8');assert.match(readme,/!\[[^\]]+\]\(docs\/demo\/preview\.gif\)/);const preview=await readFile(path.resolve('docs/demo/preview.gif'));assert.match(preview.subarray(0,6).toString('ascii'),/^GIF8[79]a$/);assert.ok(preview.length<1_000_000);
  await page.goto(pathToFileURL(path.resolve('docs/index.html')).href);
- assert.match(await page.title(),/repo-local PR impact maps/);assert.ok(await page.getByRole('heading',{name:'Run locally',exact:true}).isVisible());
+ assert.match(await page.title(),/repo-local PR impact maps/);assert.ok(await page.getByRole('heading',{name:'Install merged main',exact:true}).isVisible());assert.ok(await page.getByRole('heading',{name:'Install the PR #7 candidate',exact:true}).isVisible());
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  await page.getByRole('link',{name:'60-second guided demo',exact:true}).click();
  assert.match(await page.title(),/Guided demo/);assert.match(await page.locator('h1').textContent(),/One changed file/);

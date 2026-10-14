@@ -1,71 +1,47 @@
-# Fork verification and maintainer-trial kit
+# PatchRipple: remaining validation work
 
-Prepared 2026-10-05; fixed revisions below belong to the earlier candidate. [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) is the single current versioned status. This is an execution kit, not evidence that a person completed a trial. Same-repository evidence for the earlier source is in [HOSTED_EVIDENCE.md](HOSTED_EVIDENCE.md). The public `codex/ui-impact-explorer` baseline is `48dba51`. Current candidate `codex/audit-usability-fixes-2026-10-05` is `c92a17e` in open stacked [PR #4](https://github.com/icecold009/PatchRipple/pull/4). Hosted Runs #21 and #22 passed verify, package smoke, fixture generation, and Chromium/Firefox/WebKit browser checks. The mobile regression now waits for both the inspector disclosure and detail-panel focus; neither run uploaded an artifact. Current verification is recorded in `RELEASE_EVIDENCE.md`. Issue [#3](https://github.com/icecold009/PatchRipple/issues/3) has two invitation comments and no participant response or completed trial.
+**Status snapshot: 2026-10-14.** Public `main` is `4b45616e941ebe349b845a62a8941c586fbb18c5`. PR #4 and PR #6 are merged. PR #6's exact head `a19393fb0580bc8ba0e9c2c4c7d1e9519717eedb` passed Trusted PatchRipple CI run #38 and Static PR impact run #11. Draft PR #7 is open. Earlier code-bearing commit `882829946897c3ce461aa0e0169700f569231b78` passed local lint, typecheck, all 61 tests, build, package smoke, generated-file consistency, and exact-head hosted Trusted PatchRipple CI [#77](https://github.com/icecold009/PatchRipple/actions/runs/38434003043) and Static PR impact [#30](https://github.com/icecold009/PatchRipple/actions/runs/38434009393). Current code-bearing commit `d12fd77960e72112832aedd139a8b51cde00d058` adds explicit TypeScript `customConditions` support for package exports and passes all 64 local tests, build, package smoke, generated-file consistency, exact-head Trusted PatchRipple CI [#82](https://github.com/icecold009/PatchRipple/actions/runs/38538870223), and Static PR impact [#32](https://github.com/icecold009/PatchRipple/actions/runs/38538870203). CI #82 includes generated browser fixtures and Chromium, Firefox, and WebKit checks. Its full-SHA archive installed into an isolated npm prefix, and the CLI version/help commands succeeded. The exact Vitest #11218 comparison reduced unresolved workspace imports from 888 to 830 while still reaching the 500-node and 2,000-edge caps. PR #7 is not merged or released. See [RELEASE_EVIDENCE.md](RELEASE_EVIDENCE.md) for current evidence and limits.
 
-## Before using this kit for the current candidate
+## Use the current pinned source candidate
 
-1. Use the current candidate's exact published immutable Action commit and matching CLI bundle after it is reviewed and made available. This local candidate is not yet published; the older fixed pin below is historical evidence only.
-2. Run the diagnostic-first onboarding command from the current README on the real target repository. Record missing history, output-path, and Node/Git messages; do not treat fixture automation as a maintainer installation.
-3. Record expected, missed, and misleading edges against a real PR and ask the maintainer whether the chain explanation changed review focus. Do not fill trial rows with synthetic results.
-4. Keep the fork, same-repository hosted run, and human-trial evidence separate in the release matrix.
-
-## Fixed references
-
-| Purpose | Revision |
-| --- | --- |
-| Trusted Action and CLI with mobile correction | `528902572d5c6b5f18cf68e4a527472b421fc6ad` |
-| Public sandbox base | `95e34be0f5679a3b4430d710de4950015b60819a` |
-| Completed same-repository fixture head | `e2d34f8d9bed9e440d7568a69c52a770c1355022` |
-| Implementation PR | https://github.com/icecold009/PatchRipple/pull/1 |
-| Verification-only PR | https://github.com/icecold009/PatchRipple/pull/2 |
-
-## Fork prerequisite and execution
-
-The connector has no fork-creation operation. The user subsequently authorized browser inspection. GitHub's signed-in repository page reports: "You own icecold009/PatchRipple and are not a member of any organizations." No fork can be created from that account in the observed session. Another authorized GitHub user must supply an existing fork URL; do not invent a second identity or label a same-repository branch a fork.
-
-After a collaborator supplies the fork:
-
-1. Use the GitHub connector first to read the fork metadata. Confirm its parent/source is icecold009/PatchRipple, that it is public, and that the requested branch/files can be written. If permission is absent, stop that hosted write; the fork owner can prepare their branch and supply its URL.
-2. Start a separate fork feature branch from the sandbox base above. In sandbox/src/core.ts change `export const value = 1;` to `export const value = 2;`; in sandbox/python/pkg/lib.py change `VALUE = 1` to `VALUE = 2`. Preserve the base workflow. Neither fixture is executed.
-3. Open a draft fork PR targeting icecold009/PatchRipple main. Record repository identities, PR number, exact base tip/head and trusted Action pin. Do not merge it.
-4. Inspect the run and job steps. Expected permissions are contents:read; the workflow fetches the base repository's PR head ref and verifies exact objects. Do not install target dependencies, run target tests/configuration, add secrets, or substitute pull_request_target. If GitHub requests fork-run approval, obtain the authorized repository maintainer's approval for that specific run.
-5. Download the four-file artifact through the connector; compare ZIP SHA256 with the returned digest. Validate graph schema and exact SHAs, two changed paths, JS importer/test and Python relative importer, and revision-attributed edges. Inspect completeness/warnings instead of assuming exit0 means completeness.
-6. Open the original downloaded index.html offline, select the long Python path at320px, verify keyboard/file filtering and exact-revision source links, and record no HTTP asset requests or page errors. Record results independently; the prior same-repository artifact is not fork proof.
-
-Artifacts have14-day retention and require GitHub sign-in/repository access. Save approved evidence before expiration. Output exposes paths and CODEOWNERS; review it before wider sharing. Permanent anonymous hosting is a separate publication decision.
-
-## Maintainer installation trial
-
-A real maintainer should follow the published README at the trusted revision and run the bundle on an authorized public JS/TS or Python comparison. Node24 and Git are required. Use a new trusted tool directory; no installation/build is needed in the target repository.
+There is no versioned GitHub release or tag, and the public npm registry has no `patchripple` package in this snapshot. The current full-SHA HTTPS archive installed into an isolated npm global prefix; the CLI reported version 0.1.0 and displayed its help. The current code-bearing commit is `d12fd77960e72112832aedd139a8b51cde00d058`; it passes 64 local tests and package/build checks plus exact-head CI #82 and impact #32:
 
 ```sh
-git clone https://github.com/icecold009/PatchRipple.git /path/to/trusted-PatchRipple
-git -C /path/to/trusted-PatchRipple checkout --detach 528902572d5c6b5f18cf68e4a527472b421fc6ad
-node /path/to/trusted-PatchRipple/dist/cli.cjs --version
-node /path/to/trusted-PatchRipple/dist/cli.cjs analyze --repo /path/to/target --base BASE_COMMIT --head HEAD_COMMIT --repository https://github.com/OWNER/REPO --out /path/to/new-offline-bundle
+npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/d12fd77960e72112832aedd139a8b51cde00d058.tar.gz"
+patchripple --version
 ```
 
-The sample paths/SHAs are placeholders for the participant's environment. Fetch missing exact target objects first; output must be a new directory outside that target. Never execute target hooks/scripts/configuration to make the analyzer work. Prefer a comparison with an expected importer and a relevant test that the maintainer can independently assess. Python layouts may need explicit --python-roots .,src.
+This is a draft pre-release candidate, not a merged or versioned release. The merged `main` and consumer Action pin remain `4b45616e941ebe349b845a62a8941c586fbb18c5`. For a public GitHub PR whose commits are missing locally, run `patchripple fetch-pr --repo PATH --repository OWNER/REPO --base-branch BRANCH --pr NUMBER`; it writes the two documented PatchRipple refs without changing the checkout. See the [README](../README.md) for the complete doctor/analyze steps and limitations.
 
-Record whether the maintainer independently installed the trusted bundle, understood warnings/limits, distinguished static candidates from runtime/test coverage, and opened the offline artifact. Local automated checks do not satisfy this human requirement.
+## Complete a real fork artifact run
 
-## Three public-repository adoption trials
+The repository metadata reported `forks_count: 0` when checked on 2026-10-13. The connected GitHub route rejected fork enumeration with HTTP 400 and has no fork-creation operation. A collaborator must provide an authorized existing fork URL before a real cross-repository run can happen.
 
-Select three authorized public repositories with actual maintainers willing to try the tool. Use real review comparisons and record participant feedback; proposed repositories alone are not trials. Invitations are posted in issue [#3](https://github.com/icecold009/PatchRipple/issues/3); its current thread has no maintainer reply or trial result. Do not treat invitations as participant agreement or adoption evidence.
+When a fork is available:
 
-For each trial, record exact tool/base/head revisions, language/layout, expected and observed edges, missed/misleading candidates, whether ownership/test reasons were useful, and whether the map changed the maintainer's review focus. The structured blank record is [MAINTAINER_TRIAL_TEMPLATE.csv](MAINTAINER_TRIAL_TEMPLATE.csv). Ask for a concrete example and a limitation rather than a generic approval. Obtain permission before storing attributable feedback; use only task-relevant information.
+1. Use the GitHub connector first to verify its `parent` is `icecold009/PatchRipple`, its visibility, and the requested branch permissions.
+2. Create a fork-only feature branch based on `main` at `4b45616e941ebe349b845a62a8941c586fbb18c5`. Change only the two existing sandbox values: `sandbox/src/core.ts` from `1` to `2`, and `sandbox/python/pkg/lib.py` from `1` to `2`. Do not execute fork code or configuration.
+3. Open a draft PR from that fork to `icecold009/PatchRipple:main`. Record fork URL, PR number, exact base/head SHAs, and the trusted Action pin. Do not merge it.
+4. Confirm the workflow uses `pull_request`, `contents: read`, `persist-credentials: false`, and the pinned trusted Action. Inspect every job step and do not approve a run without the fork owner's or repository maintainer's authorization.
+5. Download the artifact through the GitHub connector, verify the ZIP SHA-256 against GitHub's artifact digest, and inspect the four bundle files. Confirm the exact SHAs, both changed paths, JavaScript and Python importer edges, warning/completeness state, and offline viewer behavior at a narrow viewport.
+6. Record the result separately from same-repository run #11 and its artifact. A same-repository artifact is not fork evidence.
 
-| Trial | Participant/repository | Exact revisions | Installation observed | Review usefulness and missed edges | Evidence link/date | State |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | Not selected | Unknown | Unknown | Unknown | None | Not started |
-| 2 | Not selected | Unknown | Unknown | Unknown | None | Not started |
-| 3 | Not selected | Unknown | Unknown | Unknown | None | Not started |
+## Complete maintainer trials
 
-Draft invitation for a selected willing participant: "Would you try PatchRipple on one public JS/TS or Python PR you maintain? It produces an offline map of static dependents, related-test evidence and owners. It executes no target code and does not claim runtime impact or safety. Please record one useful review observation and one missing or misleading edge. The pinned trial guide is available; participation is optional." Any further contact requires an identified recipient and the user's instruction to contact them.
+Issue [#3](https://github.com/icecold009/PatchRipple/issues/3) has three invitation comments and no participant reply or completed trial. No additional messages were sent as part of this task.
 
-## Completion gates
+For one observed installation and three distinct real-review trials, use [MAINTAINER_TRIAL_TEMPLATE.csv](MAINTAINER_TRIAL_TEMPLATE.csv). Record exact tool/base/head revisions, language and layout, expected/observed/missed/misleading edges, warning comprehension, offline report access, and whether review focus changed. Obtain permission before retaining attributable feedback. Invitations, synthetic fixtures, and self-hosted analysis do not count as completed trials.
 
-- Fork engineering gate: an actual cross-repository PR run and independently validated downloaded artifact.
-- Human installation gate: observed maintainer installation and comprehension of uncertainty/artifact access.
-- Adoption gate: three recorded public-repository maintainer trials with real feedback.
-- Release actions: separate explicit approval for implementation merge, deployment or package publication. Jev remains advisory; the original full implementation still lacks complete diff coverage. No receipt replaces the engineering/human gates above.
+## Record manual accessibility and device evidence
+
+Automated browser checks now assert a named selected-file inspector region and polite, atomic announcements when file selection changes through the list, graph context, and filters on the large-graph fixture. Chromium, Firefox, and WebKit checks passed at 1280×900 and 320×800. These checks do not establish screen-reader reading order, comprehension, or physical-device behavior. For a screen-reader session, record reader/browser/OS versions and test headings/landmarks, file-list navigation, search/filter and selection announcements, inspector disclosure and return focus, warning groups, and exact-revision links. For a physical-device session, record device/model, OS/browser versions and viewport; inspect file navigation, filters, warnings, inspector/scroll behavior, and horizontal overflow. Keep consent and observations with the evidence record. Emulation does not count as a physical-device result.
+
+## Resolve remaining compatibility evidence
+
+The code supports `package.json` workspace arrays/objects, package export maps, relative in-repository `tsconfig` inheritance, explicit `customConditions` for package exports when `moduleResolution` is set or inherited as `node16`, `nodenext`, or `bundler`, block and simple inline pnpm string lists, glob character classes with ranges/negation, nested comma-brace alternatives, and `**/` matching zero or more directory levels. Each brace group allows 2–16 nonempty alternatives; expansions are capped at 256 per declaration. Local `npm.cmd run verify` passed all 64 tests, and package smoke plus generated-file consistency passed after adding custom-condition support. Exact Vitest PR #11218 analysis reduced unresolved workspace warnings from 888 to 830, while still reaching the 500-node and 2,000-edge caps and remaining incomplete. Current code-bearing commit `d12fd77960e72112832aedd139a8b51cde00d058` passed exact-head CI #82 and impact #32, and its full-SHA archive installed into an isolated npm global prefix; the CLI version/help commands succeeded. Non-empty `tsconfig.references` is reported as unsupported so the graph remains incomplete when project-reference build semantics may matter. Complex YAML, flow objects, malformed classes or brace groups, groups with more than 16 alternatives, declarations exceeding the 256-expansion cap, external TypeScript config inheritance, package `imports` mappings, and project-reference build semantics remain unsupported.
+
+The PR #6 self-hosted check is a bounded sample: 7 changed files, 17 candidates, 14 revision-attributed edges, and an incomplete result due to binary and source-size warnings. A second bounded check used merged public PR [sindresorhus/p-limit#109](https://github.com/sindresorhus/p-limit/pull/109); manual source/patch review caught a false runtime-to-declaration edge that the old resolver reported as complete. Five additional exact-SHA PR comparisons covered Flask, Packaging, Express, Click, and the Vitest monorepo. Manual source inspection corroborated 17 direct importer-to-changed-source relationships across the Flask, Packaging, and Express samples. The Click sample also confirmed the changed helper's production caller while showing that module-level candidates include imports of other names from the same source file. The Vitest sample hit graph limits despite the custom-condition fix and remains incomplete. The complete scope, SHAs, warning counts, and limits are in [REAL_REPOSITORY_SAMPLES.md](REAL_REPOSITORY_SAMPLES.md). These developer-run samples improve evidence but do not substitute for independently scored maintainer trials or broad real-repository accuracy evidence.
+
+## Versioned publication
+
+The GitHub tag-ref and release lists were empty on 2026-10-13, and the public registry query `npm view patchripple` returned E404. The current Action pin is usable as a full immutable commit reference, but it is not a versioned release. The connected GitHub tools expose read-only fetch for these endpoints and no fork-creation or release-publication operation; the fork-list request returned HTTP 400. Do not use a CLI or alternate route for those hosted operations. After an authorized fork and the human, accessibility, and compatibility gates are evidenced, publish a reviewed versioned tag/release through an available authorized GitHub publication route and update the release checklist to the exact published SHA. No merge, release, registry publication, or outreach was performed for this status refresh.

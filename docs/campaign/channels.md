@@ -1,10 +1,12 @@
 # Promotion copy drafts
 
-All copy is unpublished. Recheck destination rules and links on the day of posting.
+The r/devops and LinkedIn posts were published on 23 October 2026. Show HN remains held pending the offline-report open check; DEV remains excluded.
 
 ## r/devops weekly self-promotion thread
 
 Post only in the current weekly thread and confirm that it still welcomes project posts. The current thread was checked on 23 October 2026; use the thread that is current on the planned posting date.
+
+**Status:** published 23 October 2026 in the [current r/devops weekly thread](https://www.reddit.com/r/devops/comments/1x9pgb3/weekly_self_promotion_thread/).
 
 **Image:** attach docs/demo/preview.gif. It uses fictional sample data.
 
@@ -28,7 +30,7 @@ Do not use a stale weekly-thread URL. Do not ask for votes or endorsements.
 >
 > The preview uses fictional data. The current tested install is an unreleased, pinned source candidate: https://github.com/icecold009/PatchRipple/tree/d12fd77960e72112832aedd139a8b51cde00d058
 
-Attach docs/demo/preview.gif and retain the fictional-data label. No post has been published.
+The fictional preview was attached with alt text identifying it as synthetic example data. **Status:** published 23 October 2026: [LinkedIn profile post](https://www.linkedin.com/feed/update/urn:li:activity:7519337287235608577/).
 
 ## Show HN
 
@@ -40,9 +42,18 @@ Attach docs/demo/preview.gif and retain the fictional-data label. No post has be
 >
 > The output is a review aid, not runtime impact, test coverage, or proof that a change is safe. Workspace-heavy analysis can remain incomplete at built-in graph limits; the documentation records a real Vitest stress sample and its warnings.
 >
-> Repository: https://github.com/icecold009/PatchRipple/tree/d12fd77960e72112832aedd139a8b51cde00d058
+> Try without installing: download and open the synthetic offline report at https://github.com/icecold009/PatchRipple/blob/d12fd77960e72112832aedd139a8b51cde00d058/docs/demo/index.html
+>
+> To run the tested pre-release source snapshot with Node.js 24 or newer:
+>
+> ```sh
+> npm install --global --ignore-scripts --no-audit --no-fund "https://github.com/icecold009/PatchRipple/archive/d12fd77960e72112832aedd139a8b51cde00d058.tar.gz"
+> patchripple --version
+> ```
+>
+> Trial details and public-PR workflow: https://github.com/icecold009/PatchRipple/issues/3
 
-**Launch check:** open the repository and exact-SHA install path from a clean browser session and confirm the example report can be downloaded and opened. Show HN guidelines require something readers can try; they do not permit asking friends to vote or comment. If the try path fails, do not submit.
+**Status:** held on 23 October. The report downloaded from GitHub, but browser security blocked opening the local file URL. Confirm that it opens manually before submission. Show HN guidelines require something readers can try; they do not permit asking friends to vote or comment. If the try path fails, do not submit.
 
 ## DEV
 

@@ -4,7 +4,7 @@
 
 **Goal:** three completed external trials
 
-**Working state (23 October):** focused issues [#8](https://github.com/icecold009/PatchRipple/issues/8), [#9](https://github.com/icecold009/PatchRipple/issues/9), and [#10](https://github.com/icecold009/PatchRipple/issues/10) are published and linked from the updated [central invitation #3](https://github.com/icecold009/PatchRipple/issues/3). The 15-person screen and six individual invitation drafts are ready. No individual invitation or social post has been published, and no participant trial has begun.
+**Working state (23 October):** focused issues [#8](https://github.com/icecold009/PatchRipple/issues/8), [#9](https://github.com/icecold009/PatchRipple/issues/9), and [#10](https://github.com/icecold009/PatchRipple/issues/10) are published and linked from the updated [central invitation #3](https://github.com/icecold009/PatchRipple/issues/3). The 15-person screen is complete and six individual invitations are posted on Issue #3; three original candidates were replaced after their PRs closed. The [r/devops weekly-thread comment](https://www.reddit.com/r/devops/comments/1x9pgb3/weekly_self_promotion_thread/) and [LinkedIn profile post](https://www.linkedin.com/feed/update/urn:li:activity:7519337287235608577/) are live. Show HN remains held until the downloaded offline report is confirmed to open. No replies, participant installations, or trials have been recorded.
 
 ## What counts as a completed trial
 
@@ -24,8 +24,8 @@ Use the existing [maintainer trial template](../MAINTAINER_TRIAL_TEMPLATE.csv) t
 
 | Days | Dates | Work |
 |---|---|---|
-| 1–2 | 23–24 Oct | Prepare the three issue bodies, one synthetic example report link, the one-minute demo script, and a 15-person prospect screen. |
-| 3–5 | 25–27 Oct | Send six individual invitations through PatchRipple’s own Issue #3; publish one post only in the current r/devops weekly self-promotion thread after checking it is still open and permits projects. |
+| 1–2 | 23–24 Oct | Completed 23 Oct: publish the three focused trial issues, screen 15 prospects, post six individual invitations on Issue #3, and publish the r/devops weekly-thread comment and LinkedIn profile post. Track responses; prepare a report only when a reviewer shares a public PR link. |
+| 3–5 | 25–27 Oct | Respond to concrete questions or willingness to review; prepare requested reports and record exact revisions before any trial. |
 | 6–9 | 28–31 Oct | Run participant trials; record installation and comprehension problems before changing product copy or behavior. |
 | 10–14 | 1–5 Nov | Make one appropriate follow-up after seven days. Approach up to six more prospects only if the first batch gives a reason to continue. Publish a walkthrough only after checking its claims and destination links. |
 
@@ -33,9 +33,9 @@ The campaign starts on the date above. Do not interpret elapsed time as a reply 
 
 ## Channel decisions
 
-- **r/devops:** prepare a comment for its weekly self-promotion thread. Recheck the current thread on the posting day; the current thread is time-sensitive.
-- **LinkedIn:** prepare a profile post with the synthetic preview and one separately identified observed relationship.
-- **Show HN:** hold until the repository and exact-SHA install path are directly tryable from the post and the limitations are clear. Show HN is for something readers can try; it is not a place to solicit votes.
+- **r/devops:** posted on 23 October in the current [weekly self-promotion thread](https://www.reddit.com/r/devops/comments/1x9pgb3/weekly_self_promotion_thread/). The comment discloses maintainer affiliation, labels the preview as fictional, and includes the static-analysis limits.
+- **LinkedIn:** posted on 23 October with the fictional preview and alt text. The profile post separately identifies the developer-run p-limit comparison and incomplete Vitest workspace run.
+- **Show HN:** held. GitHub exposed and downloaded the offline report, but the browser blocked opening its local file URL; opening it manually remains the tryability check. Do not submit until that check passes. Show HN is for something readers can try; it is not a place to solicit votes.
 - **DEV:** removed from this product-promotion campaign. DEV’s current AI-assisted article guidance says AI-assisted articles should not promote the author’s own business or program. Do not adapt the promotional copy into a DEV article.
 - **Other projects:** do not open promotional issues or leave promotional comments on prospects’ pull requests. Contact prospects individually from PatchRipple Issue #3. Contribute on another project only when a source-checked finding directly helps its existing discussion.
 

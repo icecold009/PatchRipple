@@ -1,17 +1,11 @@
-# Draft comment for PatchRipple Issue #3
+# Central invitation update: PatchRipple Issue #3
 
-Add this only after the three trial issues are created and their URLs are known.
+**Status:** published 23 October 2026 by updating the Issue #3 body. Do not post this copy as a separate comment.
 
----
+The central issue now links the three focused public trial tracks:
 
-I’ve prepared three focused trial tracks for reviewers who want to challenge PatchRipple on a real public PR:
+- [Shared JavaScript/TypeScript module change](https://github.com/icecold009/PatchRipple/issues/8)
+- [Small Python change](https://github.com/icecold009/PatchRipple/issues/9)
+- [Exploratory workspace imports and warning clarity](https://github.com/icecold009/PatchRipple/issues/10)
 
-- JavaScript/TypeScript shared-module change: [issue URL]
-- Small Python change: [issue URL]
-- TypeScript workspace and warning clarity: [issue URL]
-
-Each issue includes the exact tested pre-release install command, a clearly labeled synthetic example report, and the same short feedback checklist. A report critique can come before installation. No endorsement or adoption is requested.
-
----
-
-Replace every placeholder with a verified issue URL before posting.
+The live invitation includes the verified pre-release install command pinned to `d12fd77960e72112832aedd139a8b51cde00d058`, labels its example report as synthetic, and separates report critiques from completed install trials. Read the [current central issue](https://github.com/icecold009/PatchRipple/issues/3) before making future edits.

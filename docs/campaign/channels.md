@@ -1,6 +1,6 @@
 # Promotion copy drafts
 
-The r/devops and LinkedIn posts were published on 23 October 2026. Show HN remains held pending the offline-report open check; DEV remains excluded.
+The r/devops and LinkedIn posts were published on 23 October 2026. The user confirmed the Show HN offline report opens; submission awaits HN sign-in. DEV remains excluded.
 
 ## r/devops weekly self-promotion thread
 
@@ -53,7 +53,7 @@ The fictional preview was attached with alt text identifying it as synthetic exa
 >
 > Trial details and public-PR workflow: https://github.com/icecold009/PatchRipple/issues/3
 
-**Status:** held on 23 October. The report downloaded from GitHub, but browser security blocked opening the local file URL. Confirm that it opens manually before submission. Show HN guidelines require something readers can try; they do not permit asking friends to vote or comment. If the try path fails, do not submit.
+**Status:** report tryability confirmed by the user on 23 October. Submission awaits sign-in to Hacker News in the browser. Show HN guidelines require something readers can try; they do not permit asking friends to vote or comment. If sign-in is unavailable, keep the story unpublished.
 
 ## DEV
 

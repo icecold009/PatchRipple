@@ -4,7 +4,7 @@
 
 **Goal:** three completed external trials
 
-**Working state (23 October):** focused issues [#8](https://github.com/icecold009/PatchRipple/issues/8), [#9](https://github.com/icecold009/PatchRipple/issues/9), and [#10](https://github.com/icecold009/PatchRipple/issues/10) are published and linked from the updated [central invitation #3](https://github.com/icecold009/PatchRipple/issues/3). The 15-person screen is complete and six individual invitations are posted on Issue #3; three original candidates were replaced after their PRs closed. The [r/devops weekly-thread comment](https://www.reddit.com/r/devops/comments/1x9pgb3/weekly_self_promotion_thread/) and [LinkedIn profile post](https://www.linkedin.com/feed/update/urn:li:activity:7519337287235608577/) are live. Show HN remains held until the downloaded offline report is confirmed to open. No replies, participant installations, or trials have been recorded.
+**Working state (23 October):** focused issues [#8](https://github.com/icecold009/PatchRipple/issues/8), [#9](https://github.com/icecold009/PatchRipple/issues/9), and [#10](https://github.com/icecold009/PatchRipple/issues/10) are published and linked from the updated [central invitation #3](https://github.com/icecold009/PatchRipple/issues/3). The 15-person screen is complete and six individual invitations are posted on Issue #3; three original candidates were replaced after their PRs closed. The [r/devops weekly-thread comment](https://www.reddit.com/r/devops/comments/1x9pgb3/weekly_self_promotion_thread/) and [LinkedIn profile post](https://www.linkedin.com/feed/update/urn:li:activity:7519337287235608577/) are live. The downloaded offline report opens, as confirmed by the user; Show HN submission is waiting for an authenticated account. No replies, participant installations, or trials have been recorded.
 
 ## What counts as a completed trial
 
@@ -35,7 +35,7 @@ The campaign starts on the date above. Do not interpret elapsed time as a reply 
 
 - **r/devops:** posted on 23 October in the current [weekly self-promotion thread](https://www.reddit.com/r/devops/comments/1x9pgb3/weekly_self_promotion_thread/). The comment discloses maintainer affiliation, labels the preview as fictional, and includes the static-analysis limits.
 - **LinkedIn:** posted on 23 October with the fictional preview and alt text. The profile post separately identifies the developer-run p-limit comparison and incomplete Vitest workspace run.
-- **Show HN:** held. GitHub exposed and downloaded the offline report, but the browser blocked opening its local file URL; opening it manually remains the tryability check. Do not submit until that check passes. Show HN is for something readers can try; it is not a place to solicit votes.
+- **Show HN:** the user confirmed the downloaded offline report opens. Submission is pending HN sign-in in the browser. Show HN is for something readers can try; it is not a place to solicit votes.
 - **DEV:** removed from this product-promotion campaign. DEV’s current AI-assisted article guidance says AI-assisted articles should not promote the author’s own business or program. Do not adapt the promotional copy into a DEV article.
 - **Other projects:** do not open promotional issues or leave promotional comments on prospects’ pull requests. Contact prospects individually from PatchRipple Issue #3. Contribute on another project only when a source-checked finding directly helps its existing discussion.
 

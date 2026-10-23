@@ -9,5 +9,5 @@ completed_trials,3,Distinct reviewer installs runs on a real public PR opens rep
 voluntary_repeat_use,record,Participant independently uses PatchRipple on another real review,0,Do not infer from one trial
 community_posts,1,One permitted community post in the r/devops weekly thread,1,Published 2026-10-23: https://www.reddit.com/r/devops/comments/1x9pgb3/weekly_self_promotion_thread/
 profile_posts,1,One LinkedIn profile post with the fictional preview,1,Published 2026-10-23: https://www.linkedin.com/feed/update/urn:li:activity:7519337287235608577/
-show_hn_submissions,0,Show HN launch after the offline report is confirmed to open,0,Held 2026-10-23; local report open check remains
+show_hn_submissions,0,Show HN launch after the offline report is confirmed to open,0,Report open confirmed by user 2026-10-23; HN sign-in is required to submit
 walkthrough_published,1,Technical walkthrough published after claims and links are checked,0,DEV excluded from promotional use under current guidance
